@@ -1,8 +1,8 @@
-# AuraCut Studio — Phase 1 fixes
+# AuraCut Studio — Phase 2: PeakCut
 
-AuraCut runs locally on your Windows 10 or 11 PC. This phase uploads files to your local workspace, backs up a selected file, and generates basic scene scripts. It does not edit videos.
+AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
 
-## Get the Phase 1 fixes
+## Get Phase 2
 
 1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
@@ -16,7 +16,7 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase uploads files to yo
    git fetch origin
    ```
 
-3. Switch to the Phase 1 fix branch. If Git reports uncommitted changes, do not discard them; ask for help first.
+3. Switch to the Phase 2 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
    git switch arena/23bb1466-auracut-studio
@@ -63,6 +63,19 @@ If port 8000 belongs to another program, the launcher reports the process when W
 6. Ollama defaults to `qwen2.5:7b-instruct-q4_K_M` at `http://127.0.0.1:11434`. Keep Ollama running. Save `.env`, then refresh health on the page.
 7. Never share or commit `.env` or your API key.
 
+## Try PeakCut on your PC
+
+1. Close the old black AuraCut window. In File Explorer, open your AuraCut repository folder and double-click `Start AuraCut.bat`.
+2. In the browser, find **04 / PeakCut**. Check the video dropdown lists files already in `C:\AuraCut_Workspace\Input_Media`. If needed, use **Drop your video** first and click **Refresh videos**.
+3. Pick your 221 MB phone video. Set **Clip seconds** to 30 and **Highlights** to 3. Click **Find best moments**. Note how long it takes. Results show rank, time range and loudness score. If there is no audio, evenly spaced moments are used instead. Fewer results may appear if the video is too short to fit all requested clips without overlap.
+4. Choose **Whole frame + blur**. Click **Render this** for rank 1. Wait for the progress to reach 100%. Note how long it takes. In File Explorer, open `C:\AuraCut_Workspace\Output_Renders` and play the finished file. Check that it is vertical and has sound.
+5. Render the same moment using **Zoom + blur**, then **Full screen crop**. Play each result and check that it looks right. If the GPU fails, a warning says CPU was used instead; CPU rendering is slower.
+6. Click **Back up to Drive** below a finished render. Check the file appears in your configured Drive folder. The copy is verified by size, not by cloud-sync status.
+7. To try the short-video error, copy `_amf_test.mp4` from `C:\AuraCut_Workspace\Output_Renders` into `C:\AuraCut_Workspace\Input_Media` using File Explorer. In PeakCut click **Refresh videos**, choose the copy, then click **Find best moments**. The two-second video should show a clear red error explaining that at least 15 seconds are required.
+8. Paste the result of every step, the analysis and render times, and any red error text exactly to your teacher (Claude). Do not include your API key or `.env` contents.
+
+PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 30 frames per second. If a video is at least 15 seconds but shorter than the requested length, PeakCut uses the whole video. Finished files are never overwritten. Jobs are cleared when the app stops.
+
 ## Re-check the fixes on your PC
 
 1. Close the old black AuraCut window. In File Explorer, open the repository folder and double-click `Start AuraCut.bat` again.
@@ -84,7 +97,7 @@ The following command runs mocked tests in PowerShell from the repository folder
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Mocked tests do not prove the app works on your PC. Complete the checklist above. The original Phase 0 system check still runs from the same PowerShell folder:
+Mocked tests do not prove the app works on your PC. A real FFmpeg test runs when ffmpeg and ffprobe are available; it uses CPU encoding and a generated test video. Complete the PeakCut checklist above on your PC. The original Phase 0 system check still runs from the same PowerShell folder:
 
 ```powershell
 py -3 check_system.py

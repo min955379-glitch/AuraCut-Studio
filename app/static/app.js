@@ -2,6 +2,7 @@ function studio() {
   return {
     error:null, notice:'', files:[], checks:[], logs:[], dragging:false, uploading:false, progress:0,
     backing:false, generating:false, checking:false, gpuBusy:false, geminiBusy:false, geminiResult:null, topic:'', count:3, scenes:[], answered:'',
+    peakFilename:'', peakAnalyzedFile:'', peakSeconds:30, peakCount:3, peakFraming:'whole_blur', peakResults:[], peakMessage:'', peakOutput:null, peakBackupNotice:'', peakBusy:false, peakHasJob:false, peakProgress:null, peakStage:'',
     async init(){ await Promise.all([this.refreshHealth(),this.refreshFiles()]); },
     status(name){ return this.checks.find(c=>c.name===name)?.status || 'WAIT'; },
     report(e, what){
@@ -21,7 +22,8 @@ function studio() {
     replaceCheck(check){this.checks=this.checks.filter(c=>c.name!==check.name).concat([check]);},
     updateTimeoutWarning(warning){this.checks=this.checks.filter(c=>c.name!=='Gemini timeout');if(warning)this.checks.push(warning);},
     async geminiTest(){this.geminiBusy=true;this.error=null;this.geminiResult=null;try{const r=await this.request('/api/gemini-test',{method:'POST'});this.geminiResult={check:r.check,context:r.gemini_test_context};this.replaceCheck(r.check);this.updateTimeoutWarning(r.timeout_warning);if(r.check.status==='FAIL')this.report({what_failed:'Gemini test',real_cause:r.check.detail,fix:r.check.fix},'Gemini test');}catch(e){this.replaceCheck({name:'Gemini',status:'FAIL',detail:e.real_cause || String(e),fix:e.fix || 'Check the server window.'});this.report(e,'Gemini test');}finally{this.geminiBusy=false;}},
-    async refreshFiles(){try{this.files=(await this.request('/api/files')).files;}catch(e){this.report(e,'File list');}},
+    get peakVideos(){return this.files.filter(file=>file.folder==='Input_Media' ? /\.(mp4|mov|mkv|avi|webm|m4v|mpeg|mpg|m2ts|mts|3gp|wmv|flv|ts)$/i.test(file.name) : false);},
+    async refreshFiles(){try{this.files=(await this.request('/api/files')).files;if(!this.peakVideos.some(file=>file.name===this.peakFilename)){this.peakFilename=this.peakVideos[0]?.name || '';this.peakResults=[];this.peakAnalyzedFile='';}}catch(e){this.report(e,'File list');}},
     async refreshLogs(){try{this.logs=(await this.request('/api/logs')).lines;}catch(e){this.report(e,'Read logs');}},
     formatSize(n){return n<1048576 ? (n/1024).toFixed(1)+' KB' : (n/1048576).toFixed(1)+' MB';},
     uploadOne(file){return new Promise((resolve,reject)=>{
@@ -35,6 +37,11 @@ function studio() {
     async backup(file){this.backing=true;this.notice='';try{const r=await this.request('/api/backup',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:file.folder,name:file.name})});this.notice=r.message;await this.refreshFiles();}catch(e){this.report(e,'Drive backup');}finally{this.backing=false;}},
     async generate(){this.error=null;this.scenes=[];this.answered='';this.generating=true;try{const r=await this.request('/api/script',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({topic:this.topic,scene_count:this.count})});this.scenes=r.scenes;this.answered=r.answered_by;this.updateTimeoutWarning(r.timeout_warning);}catch(e){this.report(e,'Script generation');}finally{this.generating=false;}},
     async gpuTest(){this.gpuBusy=true;try{const r=await this.request('/api/gpu-test',{method:'POST'});this.checks=this.checks.filter(c=>c.name!=='AMF encode test').concat([r.check]);}catch(e){this.checks=this.checks.filter(c=>c.name!=='AMF encode test').concat([{name:'AMF encode test',status:'FAIL',detail:e.real_cause || String(e),fix:e.fix || 'Check the server window.'}]);this.report(e,'GPU encode test');}finally{this.gpuBusy=false;}},
+    peakTime(seconds){const m=Math.floor(seconds/60);const s=Math.floor(seconds%60);return String(m).padStart(2,'0')+':'+String(s).padStart(2,'0');},
+    async pollPeak(id){for(;;){const job=await this.request('/api/jobs/'+encodeURIComponent(id));this.peakProgress=job.percent;this.peakStage=job.stage;if(job.status==='done')return job.result;if(job.status==='failed')throw job.error;await new Promise(resolve=>setTimeout(resolve,1000));}},
+    async findPeaks(){this.error=null;this.peakBusy=true;this.peakResults=[];this.peakOutput=null;this.peakMessage='';this.peakHasJob=false;this.peakProgress=null;try{const file=this.peakFilename;const start=await this.request('/api/peakcut/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:file,clip_seconds:this.peakSeconds,count:this.peakCount})});this.peakHasJob=true;const result=await this.pollPeak(start.job_id);this.peakAnalyzedFile=result.filename;this.peakResults=result.windows;this.peakMessage=result.message || 'Audio loudness ranked in dBFS; higher scores are louder.';}catch(e){this.report(e,'PeakCut analysis');}finally{this.peakBusy=false;}},
+    async renderPeak(moment){this.error=null;this.peakBusy=true;this.peakOutput=null;this.peakBackupNotice='';this.peakHasJob=false;this.peakProgress=null;try{const start=await this.request('/api/peakcut/render',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({filename:this.peakAnalyzedFile,start:moment.start,end:moment.end,framing:this.peakFraming})});this.peakHasJob=true;this.peakOutput=await this.pollPeak(start.job_id);await this.refreshFiles();}catch(e){this.report(e,'PeakCut render');}finally{this.peakBusy=false;}},
+    async backupPeak(){this.peakBackupNotice='';await this.backup({folder:'Output_Renders',name:this.peakOutput.filename});this.peakBackupNotice=this.notice;},
     async copy(text){try{await navigator.clipboard.writeText(text);this.notice='Prompt copied.';}catch(e){this.report({what_failed:'Copy prompt',real_cause:e.message || String(e),fix:'Select the prompt text and copy it manually.'},'Copy prompt');}}
   };
 }

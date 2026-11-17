@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
 
-from app import brain_ai, health, storage
+from app import brain_ai, health, jobs, peakcut, storage
 from app.common import AppError, LOG_LINES, ROOT, error_data, logger, settings, workspace
 
 app = FastAPI(title='AuraCut Studio', docs_url=None, redoc_url=None, openapi_url=None)
@@ -238,3 +238,40 @@ class ClientError(BaseModel):
 def client_error(data: ClientError):
     error_data(data.what_failed, data.real_cause, data.fix, settings())
     return {'ok': True}
+
+
+class PeakAnalyzeRequest(BaseModel):
+    filename: str
+    clip_seconds: int = Field(default=30, ge=15, le=60)
+    count: int = Field(default=3, ge=1, le=5)
+
+
+class PeakRenderRequest(BaseModel):
+    filename: str
+    start: float = Field(ge=0, allow_inf_nan=False)
+    end: float = Field(gt=0, allow_inf_nan=False)
+    framing: str
+
+
+@app.post('/api/peakcut/analyze')
+def peakcut_analyze(data: PeakAnalyzeRequest):
+    config = settings()
+    peakcut.source_file(config, data.filename)
+    job_id = jobs.submit('PeakCut analysis', peakcut.analyze, config, data.filename, data.clip_seconds, data.count)
+    return {'ok': True, 'job_id': job_id}
+
+
+@app.post('/api/peakcut/render')
+def peakcut_render(data: PeakRenderRequest):
+    config = settings()
+    peakcut.source_file(config, data.filename)
+    peakcut.filter_for(data.framing)
+    if data.end <= data.start:
+        raise AppError('PeakCut render', 'The end time must be after the start time.', 'Choose a valid ranked moment and try again.')
+    job_id = jobs.submit('PeakCut render', peakcut.render, config, data.filename, data.start, data.end, data.framing)
+    return {'ok': True, 'job_id': job_id}
+
+
+@app.get('/api/jobs/{job_id}')
+def get_job(job_id: str):
+    return {'ok': True, **jobs.get(job_id)}
