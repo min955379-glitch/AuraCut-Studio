@@ -1,0 +1,2 @@
+# Optional CPU captions engine. Installed only when the user clicks the install button.
+faster-whisper>=1.2,<2.0
