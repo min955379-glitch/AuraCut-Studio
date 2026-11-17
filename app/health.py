@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import shutil
 import subprocess
@@ -6,7 +7,7 @@ import sys
 from pathlib import Path
 
 import httpx
-from app.brain_ai import ollama_url, reason
+from app.brain_ai import gemini_generate, gemini_timeout, ollama_url, reason
 from app.common import DEFAULT_MODEL, AppError, logger, workspace
 from app.storage import drive_folder, folder_test
 
@@ -14,7 +15,38 @@ from app.storage import drive_folder, folder_test
 def entry(label, status, detail, fix=''):
     if status != 'PASS':
         logger.warning('%s | Cause: %s | Fix: %s', label, detail, fix)
+    else:
+        fix = ''
     return {'name': label, 'status': status, 'detail': detail, 'fix': fix}
+
+
+def timeout_check(config):
+    _, warning = gemini_timeout(config)
+    if warning:
+        return entry('Gemini timeout', 'WARN', warning,
+                     'Set GEMINI_TIMEOUT_SECONDS to a number of at least 10 in .env.')
+    return None
+
+
+def gemini_test_context(config):
+    # A result is valid only for the exact configuration it tested. Do not expose the key.
+    values = [config.get(name, '') for name in ('GEMINI_API_KEY', 'GEMINI_MODEL', 'GEMINI_TIMEOUT_SECONDS')]
+    return hashlib.sha256(json.dumps(values, ensure_ascii=True).encode('utf-8')).hexdigest()
+
+
+async def test_gemini(config):
+    if not config.get('GEMINI_API_KEY', '').strip() or not config.get('GEMINI_MODEL', '').strip():
+        return entry('Gemini', 'FAIL', 'GEMINI_API_KEY and GEMINI_MODEL are both required for the test.',
+                     'Set the Gemini key and model in .env, then test again.')
+    try:
+        reply = await gemini_generate('Reply with the word OK.', config)
+        if not isinstance(reply, str) or not reply.strip():
+            raise ValueError('Gemini returned an empty response')
+        logger.info('Gemini test passed for model %s.', config['GEMINI_MODEL'])
+        return entry('Gemini', 'PASS', 'Real Gemini generation test passed for model {}.'.format(config['GEMINI_MODEL']))
+    except Exception as exc:
+        return entry('Gemini', 'FAIL', 'Real Gemini generation test failed: {}'.format(reason(exc, config)),
+                     'Check the Gemini key, model, internet connection and quota, then test again.')
 
 
 def local_checks(config):
@@ -77,7 +109,7 @@ async def gemini_health(config):
     try:
         models = []
         token = None
-        async with httpx.AsyncClient(timeout=4, trust_env=False) as client:
+        async with httpx.AsyncClient(timeout=8, trust_env=False) as client:
             for _ in range(20):
                 params = {'pageSize': 100}
                 if token:
@@ -95,7 +127,8 @@ async def gemini_health(config):
             available = ', '.join(models) if models else '(no generateContent models returned)'
             return entry('Gemini', 'WARN', 'GEMINI_MODEL is empty or unavailable. Available models: {}'.format(available),
                          'Set GEMINI_MODEL in .env to one of the listed names, then refresh health.')
-        return entry('Gemini', 'PASS', 'Key can list models; configured model {} supports generateContent.'.format(model))
+        return entry('Gemini', 'WARN', 'Key and model look valid (not tested). Model: {}.'.format(model),
+                     'Click Test Gemini now to check a real generation request.')
     except Exception as exc:
         return entry('Gemini', 'WARN', 'Could not validate the key/model or list available models: {}'.format(reason(exc, config)),
                      'Check the key, internet connection, and Gemini API access; retry health.')
