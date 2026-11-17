@@ -23,6 +23,9 @@ def safe_file(config, folder, name):
     if folder not in ('Input_Media', 'Output_Renders') or not valid_name(name):
         raise AppError('File selection', 'Invalid folder or unsafe filename: {} / {}'.format(folder, name),
                        'Choose a file from the displayed list, without folder paths in its name.')
+    if folder == 'Output_Renders' and name.startswith('._peakcut_'):
+        raise AppError('File selection', 'This PeakCut render is still a temporary file.',
+                       'Wait for the render to finish before choosing or backing it up.')
     base = workspace(config) / folder
     path = base / name
     if path.is_symlink() or (hasattr(path, 'is_junction') and path.is_junction()):
@@ -94,6 +97,8 @@ def list_files(config):
     files = []
     for folder in ('Input_Media', 'Output_Renders'):
         for path in sorted((root / folder).iterdir(), key=lambda p: p.name.lower()):
+            if folder == 'Output_Renders' and path.name.startswith('._peakcut_'):
+                continue
             if path.is_symlink() or not path.is_file():
                 continue
             size = path.stat().st_size

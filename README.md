@@ -1,8 +1,8 @@
-# AuraCut Studio — Phase 1
+# AuraCut Studio — Phase 2: PeakCut
 
-AuraCut runs locally on your Windows 10 or 11 PC. This phase uploads files to your local workspace, backs up a selected file, and generates basic scene scripts. It does not edit videos.
+AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
 
-## Get the Phase 1 code
+## Get Phase 2
 
 1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
@@ -16,10 +16,10 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase uploads files to yo
    git fetch origin
    ```
 
-3. Switch to the Phase 1 branch. If Git reports uncommitted changes, do not discard them; ask for help first.
+3. Switch to the Phase 2 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/807355ae-auracut-studio
+   git switch arena/23bb1466-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -59,19 +59,33 @@ If port 8000 belongs to another program, the launcher reports the process when W
 
 3. For Drive backups, set `AURACUT_DRIVE_BACKUP` to an **existing** Google Drive folder, for example `G:\My Drive\AuraCut_Backup`. Start Google Drive for desktop first. Leave the workspace set to `C:\AuraCut_Workspace`.
 4. Gemini is optional. To enable it, enter both `GEMINI_API_KEY` and `GEMINI_MODEL`. If the model is blank or invalid, the System health card lists available model names when the key can be checked. Pick one and save `.env`.
-5. Ollama defaults to `qwen2.5:7b-instruct-q4_K_M` at `http://127.0.0.1:11434`. Keep Ollama running. Save `.env`, then refresh health on the page.
-6. Never share or commit `.env` or your API key.
+5. Gemini's request timeout defaults to 12 seconds, even if your existing `.env` has no timeout setting. To change it, add `GEMINI_TIMEOUT_SECONDS=12` to `.env` and change the number. Values below 10 are raised to 10 seconds and shown as a warning. Invalid values use 12 seconds and show a warning.
+6. Ollama defaults to `qwen2.5:7b-instruct-q4_K_M` at `http://127.0.0.1:11434`. Keep Ollama running. Save `.env`, then refresh health on the page.
+7. Never share or commit `.env` or your API key.
 
-## Your checklist
+## Try PeakCut on your PC
 
-1. Start AuraCut. Confirm the browser page opens.
-2. In **System health**, Python, ffmpeg, ffprobe, Input_Media, Output_Renders and Ollama should say PASS. Drive should say PASS after you configure it. Gemini can say WARN if you did not configure it. The AMF test says WARN until you run it.
-3. Drag a small video into **Drop your video**. Check it appears in the list and in `C:\AuraCut_Workspace\Input_Media` in File Explorer.
-4. Click **Back up to Drive** beside that file. Check the file appears in your configured Drive folder. The app verifies the local copy exists and has the same size; it does not verify cloud sync. Existing backup files are not overwritten.
-5. Enter a topic and click **Generate**. Check scenes appear, each counter is at or under 880, and the page says **Answered by**.
-6. Click **Run GPU encode test**. A PASS means FFmpeg created and checked a two-second clip at `C:\AuraCut_Workspace\Output_Renders\_amf_test.mp4`. A FAIL shows the actual FFmpeg error and a fix.
-7. To test the error display, stop Ollama. If Gemini is configured, temporarily leave `GEMINI_MODEL` blank in `.env` and save it, so Gemini cannot answer instead. Click **Generate** again. A clear error should appear. Restart Ollama and restore the model setting afterwards.
-8. Paste a screenshot or text of the health card and the result of every checklist step back to your teacher (Claude). Do not include your API key or `.env` contents.
+1. Close the old black AuraCut window. In File Explorer, open your AuraCut repository folder and double-click `Start AuraCut.bat`.
+2. In the browser, find **04 / PeakCut**. Check the video dropdown lists files already in `C:\AuraCut_Workspace\Input_Media`. If needed, use **Drop your video** first and click **Refresh videos**.
+3. Pick your 221 MB phone video. Set **Clip seconds** to 30 and **Highlights** to 3. Click **Find best moments**. Note how long it takes. Results show rank, time range and loudness score. If there is no audio, evenly spaced moments are used instead. Fewer results may appear if the video is too short to fit all requested clips without overlap.
+4. Choose **Whole frame + blur**. Click **Render this** for rank 1. Wait for the progress to reach 100%. Note how long it takes. In File Explorer, open `C:\AuraCut_Workspace\Output_Renders` and play the finished file. Check that it is vertical and has sound.
+5. Render the same moment using **Zoom + blur**, then **Full screen crop**. Play each result and check that it looks right. If the GPU fails, a warning says CPU was used instead; CPU rendering is slower.
+6. Click **Back up to Drive** below a finished render. Check the file appears in your configured Drive folder. The copy is verified by size, not by cloud-sync status.
+7. To try the short-video error, copy `_amf_test.mp4` from `C:\AuraCut_Workspace\Output_Renders` into `C:\AuraCut_Workspace\Input_Media` using File Explorer. In PeakCut click **Refresh videos**, choose the copy, then click **Find best moments**. The two-second video should show a clear red error explaining that at least 15 seconds are required.
+8. Paste the result of every step, the analysis and render times, and any red error text exactly to your teacher (Claude). Do not include your API key or `.env` contents.
+
+PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 30 frames per second. If a video is at least 15 seconds but shorter than the requested length, PeakCut uses the whole video. Finished files are never overwritten. Jobs are cleared when the app stops.
+
+## Re-check the fixes on your PC
+
+1. Close the old black AuraCut window. In File Explorer, open the repository folder and double-click `Start AuraCut.bat` again.
+2. In **System health**, click **Test Gemini now**. A successful real request shows `PASS · Gemini` and `Real Gemini generation test passed`. Before the test, a valid listed model says `Key and model look valid (not tested)`. If the test fails, copy the displayed cause and fix; do not copy your API key.
+3. Enter a topic and click **Generate**. It should say **Answered by: Gemini**. If Gemini fails, it falls back to Ollama and shows the Gemini reason.
+4. Check the Python PASS line has no `Fix:` text.
+5. Test the previously pending error case: stop Ollama. In Notepad, temporarily empty `GEMINI_MODEL=` in `.env` and save it. Close the black AuraCut window, then double-click `Start AuraCut.bat` again. Click **Generate**. A crimson error should explain both the Gemini and Ollama reasons. Restore your original model in `.env` and restart Ollama afterwards.
+6. Paste the result of each step and any failure's cause and fix back to your teacher (Claude). Do not include your API key or `.env` contents.
+
+A successful Gemini test confirms one tiny request worked at that moment; it does not guarantee a later generation will succeed. A refreshed page starts with the untested status again.
 
 All processing uses `C:\AuraCut_Workspace\Input_Media` and `C:\AuraCut_Workspace\Output_Renders`, not a Drive path. The app only copies a file to Drive when you click its backup button. A Drive failure does not delete your local file.
 
@@ -83,7 +97,7 @@ The following command runs mocked tests in PowerShell from the repository folder
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-Mocked tests do not prove the app works on your PC. Complete the checklist above. The original Phase 0 system check still runs from the same PowerShell folder:
+Mocked tests do not prove the app works on your PC. A real FFmpeg test runs when ffmpeg and ffprobe are available; it uses CPU encoding and a generated test video. Complete the PeakCut checklist above on your PC. The original Phase 0 system check still runs from the same PowerShell folder:
 
 ```powershell
 py -3 check_system.py

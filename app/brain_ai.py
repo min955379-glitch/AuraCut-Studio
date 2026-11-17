@@ -1,7 +1,9 @@
 """Stateless per-request Gemini-first router and scene validation."""
 import asyncio
 import json
+import math
 import re
+import sys
 from urllib.parse import urlsplit
 
 import httpx
@@ -11,6 +13,32 @@ from google.genai import types
 from app.common import AppError, DEFAULT_MODEL, clean, logger
 
 MAX_YT_CREATE_CHARS = 880
+DEFAULT_GEMINI_TIMEOUT_SECONDS = 12
+MIN_GEMINI_TIMEOUT_SECONDS = 10
+
+
+def gemini_timeout(config):
+    """Return the effective timeout and a warning (if any), without changing config."""
+    raw = config.get('GEMINI_TIMEOUT_SECONDS', '').strip()
+    if not raw:
+        return DEFAULT_GEMINI_TIMEOUT_SECONDS, None
+    try:
+        seconds = float(raw)
+        if not math.isfinite(seconds):
+            raise ValueError('not a finite number')
+    except ValueError:
+        return DEFAULT_GEMINI_TIMEOUT_SECONDS, (
+            'GEMINI_TIMEOUT_SECONDS is not a finite number: {}. Using {} seconds.'
+            .format(clean(raw, config), DEFAULT_GEMINI_TIMEOUT_SECONDS))
+    if seconds < MIN_GEMINI_TIMEOUT_SECONDS:
+        return MIN_GEMINI_TIMEOUT_SECONDS, (
+            'GEMINI_TIMEOUT_SECONDS is {} seconds, below the 10-second minimum. Using 10 seconds.'
+            .format(clean(raw, config)))
+    if seconds > sys.maxsize / 1000:
+        return DEFAULT_GEMINI_TIMEOUT_SECONDS, (
+            'GEMINI_TIMEOUT_SECONDS is too large: {}. Using {} seconds.'
+            .format(clean(raw, config), DEFAULT_GEMINI_TIMEOUT_SECONDS))
+    return seconds, None
 
 
 def ollama_url(config):
@@ -46,15 +74,18 @@ def overlong(scenes):
 
 
 async def gemini_generate(prompt, config):
+    timeout, warning = gemini_timeout(config)
+    if warning:
+        logger.warning('Gemini timeout | Cause: %s | Fix: Set GEMINI_TIMEOUT_SECONDS to 10 or more in .env.', warning)
     client = genai.Client(api_key=config['GEMINI_API_KEY'], http_options=types.HttpOptions(
-        timeout=4000, retry_options=types.HttpRetryOptions(attempts=1)))
+        timeout=math.ceil(timeout * 1000), retry_options=types.HttpRetryOptions(attempts=1)))
     try:
         async def call():
             response = await client.aio.models.generate_content(
                 model=config['GEMINI_MODEL'], contents=prompt,
                 config=types.GenerateContentConfig(automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True, maximum_remote_calls=1)))
             return response.text
-        return await asyncio.wait_for(call(), timeout=4)
+        return await asyncio.wait_for(call(), timeout=timeout)
     finally:
         await client.aio.aclose()
 
