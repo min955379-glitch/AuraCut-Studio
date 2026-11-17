@@ -1,45 +1,90 @@
-# AuraCut Studio — Phase 0
+# AuraCut Studio — Phase 1
 
-This phase checks your Windows PC. It does not edit videos, run a server, or upload files.
+AuraCut runs locally on your Windows 10 or 11 PC. This phase uploads files to your local workspace, backs up a selected file, and generates basic scene scripts. It does not edit videos.
 
-## Run the check
+## Get the Phase 1 code
 
-1. Open PowerShell on your Windows 10 or 11 PC.
-2. Change to the folder containing `check_system.py`. For example, if you saved this repository in `C:\AuraCut-Studio`, enter:
+1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
    ```powershell
    cd C:\AuraCut-Studio
    ```
 
-3. Run the check:
+2. Download the branch information:
 
    ```powershell
-   py -3 check_system.py
+   git fetch origin
    ```
 
-4. Copy the full output and paste it back to your teacher (Claude). Do not paste your `.env` file or API key.
+3. Switch to the Phase 1 branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
-Each check prints PASS, WARN, or FAIL. WARN and FAIL include a suggested fix. The last line shows the totals, such as `PASS 5 / WARN 2 / FAIL 0`. Your totals may differ. A FAIL means something needs attention; the script returns exit code 1. A WARN alone does not make the script fail.
+   ```powershell
+   git switch arena/807355ae-auracut-studio
+   ```
 
-The check creates `C:\AuraCut_Workspace\Input_Media` and `C:\AuraCut_Workspace\Output_Renders` if needed and tests whether they are writable. It only checks whether FFmpeg lists `h264_amf`; it does not test actual GPU encoding.
+4. Pull updates to that branch:
 
-## Optional settings
+   ```powershell
+   git pull
+   ```
 
-1. In PowerShell, first change to the folder containing `check_system.py` as described above.
-2. If you do not already have an `.env` file, create one:
+## Start the app
+
+1. In File Explorer, open `C:\AuraCut-Studio` (or wherever you saved the repository).
+2. Double-click `Start AuraCut.bat`. Alternatively, in PowerShell in that folder run:
+
+   ```powershell
+   py -3 run.py
+   ```
+
+3. The first run creates `.venv` and installs Python packages. This requires internet; it can take a few minutes. Keep the window open. Later runs skip installation unless the requirements change.
+4. Your browser should open `http://127.0.0.1:8000`. If it does not, enter that address in the browser yourself. The server listens only on your own PC.
+5. Keep the PowerShell or batch window open while using AuraCut. Press Ctrl+C in that window to stop the server.
+
+If port 8000 belongs to another program, the launcher reports the process when Windows can identify it. Close that program yourself and retry. AuraCut never stops it for you. If AuraCut is already running, the launcher opens the existing page.
+
+## Configure optional Gemini and Drive settings
+
+1. In PowerShell, open the repository folder. If `.env` does not already exist, make it from the example:
 
    ```powershell
    Copy-Item .env.example .env
    ```
 
-3. Open `.env` in Notepad:
+2. Open it in Notepad:
 
    ```powershell
    notepad .env
    ```
 
-4. Optionally put your Gemini key after `GEMINI_API_KEY=`. The check only detects a nonempty value; it does not validate the key.
-5. Optionally put your existing Google Drive backup folder's full path after `AURACUT_DRIVE_BACKUP=`, for example `G:\My Drive\AuraCut_Backup`. Save and close Notepad. The folder must already exist. The check only tests local write access, not cloud sync.
-6. Run the check again using the command above. Never share or commit `.env`.
+3. For Drive backups, set `AURACUT_DRIVE_BACKUP` to an **existing** Google Drive folder, for example `G:\My Drive\AuraCut_Backup`. Start Google Drive for desktop first. Leave the workspace set to `C:\AuraCut_Workspace`.
+4. Gemini is optional. To enable it, enter both `GEMINI_API_KEY` and `GEMINI_MODEL`. If the model is blank or invalid, the System health card lists available model names when the key can be checked. Pick one and save `.env`.
+5. Ollama defaults to `qwen2.5:7b-instruct-q4_K_M` at `http://127.0.0.1:11434`. Keep Ollama running. Save `.env`, then refresh health on the page.
+6. Never share or commit `.env` or your API key.
 
-All future media processing must use the local `C:\AuraCut_Workspace` folders, not a Google Drive path. Google Drive is only for backups of finished files. This phase does not copy files to Drive.
+## Your checklist
+
+1. Start AuraCut. Confirm the browser page opens.
+2. In **System health**, Python, ffmpeg, ffprobe, Input_Media, Output_Renders and Ollama should say PASS. Drive should say PASS after you configure it. Gemini can say WARN if you did not configure it. The AMF test says WARN until you run it.
+3. Drag a small video into **Drop your video**. Check it appears in the list and in `C:\AuraCut_Workspace\Input_Media` in File Explorer.
+4. Click **Back up to Drive** beside that file. Check the file appears in your configured Drive folder. The app verifies the local copy exists and has the same size; it does not verify cloud sync. Existing backup files are not overwritten.
+5. Enter a topic and click **Generate**. Check scenes appear, each counter is at or under 880, and the page says **Answered by**.
+6. Click **Run GPU encode test**. A PASS means FFmpeg created and checked a two-second clip at `C:\AuraCut_Workspace\Output_Renders\_amf_test.mp4`. A FAIL shows the actual FFmpeg error and a fix.
+7. To test the error display, stop Ollama. If Gemini is configured, temporarily leave `GEMINI_MODEL` blank in `.env` and save it, so Gemini cannot answer instead. Click **Generate** again. A clear error should appear. Restart Ollama and restore the model setting afterwards.
+8. Paste a screenshot or text of the health card and the result of every checklist step back to your teacher (Claude). Do not include your API key or `.env` contents.
+
+All processing uses `C:\AuraCut_Workspace\Input_Media` and `C:\AuraCut_Workspace\Output_Renders`, not a Drive path. The app only copies a file to Drive when you click its backup button. A Drive failure does not delete your local file.
+
+## Tests and Phase 0 check
+
+The following command runs mocked tests in PowerShell from the repository folder after the first app start:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest discover -s tests -v
+```
+
+Mocked tests do not prove the app works on your PC. Complete the checklist above. The original Phase 0 system check still runs from the same PowerShell folder:
+
+```powershell
+py -3 check_system.py
+```
