@@ -3,6 +3,7 @@ import os
 import re
 import uuid
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, Request
 from python_multipart.multipart import MultipartParser, parse_options_header
@@ -13,7 +14,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
 
-from app import brain_ai, health, jobs, peakcut, storage
+from app import brain_ai, captions, health, jobs, peakcut, storage
 from app.common import AppError, LOG_LINES, ROOT, error_data, logger, settings, workspace
 
 app = FastAPI(title='AuraCut Studio', docs_url=None, redoc_url=None, openapi_url=None)
@@ -87,8 +88,12 @@ async def get_health():
             return await asyncio.wait_for(health.gemini_health(config), timeout=8)
         except asyncio.TimeoutError:
             return health.entry('Gemini', 'WARN', 'Listing Gemini models timed out after 8 seconds.', 'Check internet access and retry health.')
-    local, ollama, gemini = await asyncio.gather(run_in_threadpool(health.local_checks, config), health.ollama_health(config), limited_gemini())
-    checks = local + [ollama, gemini, health.entry('AMF encode test', 'WARN', 'Not run by this health check.', 'Click Run GPU encode test to verify the hardware encoder.')]
+    local, ollama, gemini, engine = await asyncio.gather(run_in_threadpool(health.local_checks, config), health.ollama_health(config), limited_gemini(), run_in_threadpool(captions.engine_status))
+    installed, engine_reason = engine
+    engine_check = (health.entry('Captions engine', 'PASS', 'Installed and ready.') if installed else
+                    health.entry('Captions engine', 'WARN', 'Not installed or cannot load: {}'.format(engine_reason),
+                                 'Click Install captions engine in the PeakCut card.'))
+    checks = local + [ollama, gemini, engine_check, health.entry('AMF encode test', 'WARN', 'Not run by this health check.', 'Click Run GPU encode test to verify the hardware encoder.')]
     timeout_warning = health.timeout_check(config)
     if timeout_warning:
         checks.append(timeout_warning)
@@ -246,11 +251,20 @@ class PeakAnalyzeRequest(BaseModel):
     count: int = Field(default=3, ge=1, le=5)
 
 
+class CaptionOptions(BaseModel):
+    enabled: bool = False
+    style: Literal['bold_gold', 'clean_ivory'] = 'bold_gold'
+    language: Literal['auto', 'en', 'ur', 'hi'] = 'auto'
+    text_mode: Literal['as_spoken', 'translate'] = 'as_spoken'
+    model_size: Literal['small', 'base'] = 'small'
+
+
 class PeakRenderRequest(BaseModel):
     filename: str
     start: float = Field(ge=0, allow_inf_nan=False)
     end: float = Field(gt=0, allow_inf_nan=False)
     framing: str
+    captions: CaptionOptions = Field(default_factory=CaptionOptions)
 
 
 @app.post('/api/peakcut/analyze')
@@ -268,7 +282,13 @@ def peakcut_render(data: PeakRenderRequest):
     peakcut.filter_for(data.framing)
     if data.end <= data.start:
         raise AppError('PeakCut render', 'The end time must be after the start time.', 'Choose a valid ranked moment and try again.')
-    job_id = jobs.submit('PeakCut render', peakcut.render, config, data.filename, data.start, data.end, data.framing)
+    job_id = jobs.submit('PeakCut render', peakcut.render, config, data.filename, data.start, data.end, data.framing, data.captions.model_dump())
+    return {'ok': True, 'job_id': job_id}
+
+
+@app.post('/api/captions/install')
+async def install_captions():
+    job_id = jobs.submit('Captions engine install', captions.install_engine)
     return {'ok': True, 'job_id': job_id}
 
 

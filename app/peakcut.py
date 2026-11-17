@@ -10,6 +10,7 @@ import threading
 from collections import deque
 from pathlib import Path
 
+from app import captions
 from app.common import AppError, logger, workspace
 from app.storage import safe_file
 
@@ -26,7 +27,7 @@ def executable(name):
     if not path:
         raise AppError('PeakCut', '{} was not found on PATH.'.format(name),
                        'Install FFmpeg and add its bin folder to PATH, then restart AuraCut.')
-    return path
+    return str(Path(path).resolve())
 
 
 def source_file(config, filename):
@@ -73,10 +74,10 @@ def probe(path):
     return {'duration': duration, 'audio': any(s.get('codec_type') == 'audio' for s in streams), 'streams': streams}
 
 
-def run_ffmpeg(args, timeout, on_line):
+def run_ffmpeg(args, timeout, on_line, cwd=None):
     """Consume stdout while collecting a bounded stderr tail and enforcing a wall-clock timeout."""
     try:
-        proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        proc = subprocess.Popen(args, cwd=str(cwd) if cwd is not None else None, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 text=True, encoding='utf-8', errors='replace', bufsize=1)
     except OSError as exc:
         raise AppError('PeakCut FFmpeg', 'Could not start FFmpeg: {}'.format(exc),
@@ -221,10 +222,16 @@ def filter_for(framing):
             '[blur][front]overlay=(W-w)/2:(H-h)/2:shortest=1,setsar=1,fps=30,format=yuv420p[v]')
 
 
-def render_args(source, target, start, end, framing, encoder):
+def render_args(source, target, start, end, framing, encoder, with_captions=False):
+    filters = filter_for(framing)
+    output_label = '[v]'
+    if with_captions:
+        # Both filenames are relative to the subprocess working directory, never a Windows path.
+        filters += ';[v]ass=filename=captions.ass:fontsdir=fonts[captioned]'
+        output_label = '[captioned]'
     args = [executable('ffmpeg'), '-hide_banner', '-v', 'error', '-nostats', '-y', '-ss', '{:.3f}'.format(start),
-            '-i', str(source), '-t', '{:.3f}'.format(end - start), '-filter_complex', filter_for(framing),
-            '-map', '[v]', '-map', '0:a:0?', '-c:v', encoder]
+            '-i', str(source), '-t', '{:.3f}'.format(end - start), '-filter_complex', filters,
+            '-map', output_label, '-map', '0:a:0?', '-c:v', encoder]
     if encoder == 'libx264':
         args.extend(['-preset', 'veryfast'])
     args.extend(['-r', '30', '-c:a', 'aac', '-movflags', '+faststart', '-progress', 'pipe:1', str(target)])
@@ -247,7 +254,53 @@ def publish_temp(temp, folder, stem):
     raise AppError('PeakCut render', 'Could not find an unused output filename.', 'Move or rename old renders, then retry.')
 
 
-def render(config, filename, start, end, framing, progress=lambda *_: None, cpu_only=False):
+def publish_pair(video_temp, srt_temp, folder, stem):
+    """Publish matching names without overwriting either file; roll back on failure."""
+    for number in range(10000):
+        base = stem + ('' if number == 0 else '_{}'.format(number))
+        video, srt = folder / (base + '.mp4'), folder / (base + '.srt')
+        try:
+            os.link(video_temp, video)
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise AppError('PeakCut render', 'Could not publish the finished video: {}'.format(exc),
+                           'Check local Output_Renders permissions and free space, then retry.') from exc
+        try:
+            os.link(srt_temp, srt)
+            return video, srt
+        except FileExistsError:
+            video.unlink()
+        except OSError as exc:
+            video.unlink()
+            raise AppError('Caption output', 'Could not publish the SRT file: {}'.format(exc),
+                           'Check local Output_Renders permissions and free space, then retry.') from exc
+    raise AppError('PeakCut render', 'Could not find unused video and SRT filenames.',
+                   'Move or rename old renders, then retry.')
+
+
+def extract_clip_audio(source, wav, start, length, progress):
+    progress(0, 'Extracting audio')
+    def on_line(line):
+        if line.startswith(('out_time_us=', 'out_time_ms=')):
+            try:
+                seconds = int(line.split('=', 1)[1]) / 1000000
+                progress(min(99, seconds / length * 100), 'Extracting audio')
+            except ValueError:
+                pass  # FFmpeg can report N/A before it produces a timestamp.
+    args = [executable('ffmpeg'), '-hide_banner', '-v', 'error', '-nostats', '-y', '-ss', '{:.3f}'.format(start),
+            '-i', str(source), '-t', '{:.3f}'.format(length), '-map', '0:a:0', '-vn', '-ac', '1', '-ar', '16000',
+            '-c:a', 'pcm_s16le', '-progress', 'pipe:1', str(wav)]
+    ok, detail = run_ffmpeg(args, RENDER_TIMEOUT, on_line)
+    if not ok:
+        raise AppError('Extracting caption audio', 'FFmpeg could not extract the selected audio: {}'.format(detail),
+                       'Check the source audio and local disk space, then try again.')
+    if not wav.is_file() or wav.stat().st_size == 0:
+        raise AppError('Extracting caption audio', 'FFmpeg produced an empty audio file.',
+                       'Check the source audio and local disk space, then try again.')
+
+
+def render(config, filename, start, end, framing, captions_options=None, progress=lambda *_: None, cpu_only=False):
     source = source_file(config, filename)
     if not math.isfinite(start) or not math.isfinite(end) or start < 0 or end <= start:
         raise AppError('PeakCut render', 'Invalid start or end time: {} to {}.'.format(start, end),
@@ -263,7 +316,48 @@ def render(config, filename, start, end, framing, progress=lambda *_: None, cpu_
     fd, temp_name = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix='.mp4', dir=str(folder))
     os.close(fd)
     temp = Path(temp_name)
+    caption_temp = None
+    srt_temp = None
+    with_captions = False
+    caption_message = ''
+    caption_warning = ''
     try:
+        options = captions_options or {}
+        if options.get('enabled'):
+            style = options.get('style', 'bold_gold')
+            language = options.get('language', 'auto')
+            text_mode = options.get('text_mode', 'as_spoken')
+            model_size = options.get('model_size', 'small')
+            if style not in captions.STYLES or language not in captions.LANGUAGES or text_mode not in captions.TEXT_MODES or model_size not in ('small', 'base'):
+                raise AppError('Captions options', 'An unsupported captions option was requested.', 'Choose one of the listed captions options.')
+            installed, reason = captions.engine_status() if info['audio'] else (True, '')
+            if not installed:
+                caption_warning = ('Captions engine is not installed or cannot load: {}. Rendered without captions. '
+                                   'Fix: Click Install captions engine and try again.').format(reason)
+                logger.warning('%s', caption_warning)
+            else:
+                caption_temp = tempfile.TemporaryDirectory(prefix=TEMP_PREFIX, dir=str(folder))
+                directory = Path(caption_temp.name)
+                words = []
+                if info['audio']:
+                    wav = directory / 'clip.wav'
+                    extract_clip_audio(source, wav, start, length, progress)
+                    words = captions.transcribe_clip(wav, captions.model_folder(config), model_size, language, text_mode, length, progress)
+                progress(None, 'Building captions')
+                srt_temp = directory / 'captions.srt'
+                try:
+                    srt_temp.write_text(captions.srt_text(words), encoding='utf-8-sig')
+                    if words:
+                        (directory / 'captions.ass').write_text(captions.ass_text(words, style), encoding='utf-8')
+                        (directory / 'fonts').mkdir()
+                        shutil.copy2(captions.FONT_PATH, directory / 'fonts' / 'AuraCutCaption-Bold.ttf')
+                        with_captions = True
+                    else:
+                        caption_message = 'No speech found, rendered without captions. The SRT is empty.'
+                        logger.info(caption_message)
+                except OSError as exc:
+                    raise AppError('Building captions', 'Could not write captions or copy the bundled font: {}'.format(exc),
+                                   'Check local workspace permissions and free space, then retry.') from exc
         gpu_error = None
         encoders = ('libx264',) if cpu_only else ('h264_amf', 'libx264')
         for encoder in encoders:
@@ -276,7 +370,11 @@ def render(config, filename, start, end, framing, progress=lambda *_: None, cpu_
                         progress(min(98, seconds / length * 100), stage)
                     except ValueError:
                         pass  # FFmpeg can report N/A before it has produced a timestamp.
-            ok, detail = run_ffmpeg(render_args(source, temp, start, end, framing, encoder), RENDER_TIMEOUT, on_line)
+            if with_captions:
+                args = render_args(source, temp, start, end, framing, encoder, with_captions=True)
+                ok, detail = run_ffmpeg(args, RENDER_TIMEOUT, on_line, cwd=caption_temp.name)
+            else:
+                ok, detail = run_ffmpeg(render_args(source, temp, start, end, framing, encoder), RENDER_TIMEOUT, on_line)
             if ok:
                 break
             if encoder == 'h264_amf':
@@ -302,11 +400,18 @@ def render(config, filename, start, end, framing, progress=lambda *_: None, cpu_
                            'Check the FFmpeg installation and try again.')
         safe_stem = re.sub(r'[^A-Za-z0-9_-]+', '_', source.stem).strip('_')[:60] or 'video'
         stem = 'peakcut_{}_{:.2f}-{:.2f}_{}'.format(safe_stem, start, end, framing)
-        destination = publish_temp(temp, folder, stem)
-        warning = ''
+        srt_destination = None
+        if srt_temp is not None:
+            destination, srt_destination = publish_pair(temp, srt_temp, folder, stem)
+        else:
+            destination = publish_temp(temp, folder, stem)
+        warnings = [caption_warning] if caption_warning else []
         if gpu_error:
-            warning = 'GPU encode failed, used CPU. Slower. GPU reason: {}. Fix: Check AMD drivers and FFmpeg AMF support.'.format(gpu_error)
+            warnings.append('GPU encode failed, used CPU. Slower. GPU reason: {}. Fix: Check AMD drivers and FFmpeg AMF support.'.format(gpu_error))
         return {'filename': destination.name, 'folder': 'Output_Renders', 'duration': output['duration'],
-                'encoder': encoder, 'warning': warning}
+                'encoder': encoder, 'warning': ' '.join(warnings), 'caption_message': caption_message,
+                'captions_burned': with_captions, 'srt_filename': srt_destination.name if srt_destination else None}
     finally:
         temp.unlink(missing_ok=True)
+        if caption_temp is not None:
+            caption_temp.cleanup()

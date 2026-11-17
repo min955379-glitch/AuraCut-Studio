@@ -1,8 +1,8 @@
-# AuraCut Studio — Phase 2: PeakCut
+# AuraCut Studio — Phase 3: PeakCut captions
 
 AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
 
-## Get Phase 2
+## Get Phase 3
 
 1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
@@ -16,10 +16,10 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
    git fetch origin
    ```
 
-3. Switch to the Phase 2 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
+3. Switch to the Phase 3 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/23bb1466-auracut-studio
+   git switch arena/6d8006e2-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -75,6 +75,21 @@ If port 8000 belongs to another program, the launcher reports the process when W
 8. Paste the result of every step, the analysis and render times, and any red error text exactly to your teacher (Claude). Do not include your API key or `.env` contents.
 
 PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 30 frames per second. If a video is at least 15 seconds but shorter than the requested length, PeakCut uses the whole video. Finished files are never overwritten. Jobs are cleared when the app stops.
+
+## Try captions on your PC
+
+1. Close the old black AuraCut window. Open your repository folder in File Explorer, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser tab. The first app startup may install core packages.
+2. In **System health**, look for **Captions engine: WARN** (not installed). In **04 / PeakCut**, the disabled checkbox explains that installation is needed.
+3. Click **Install captions engine**. Leave the window open. It may take several minutes depending on internet speed. Wait for **Captions engine: PASS**. If it fails, copy the complete red error and its fix.
+4. Select a video with clear speech and click **Find best moments**. Tick **Add captions**, select **Bold Gold**, and render a moment. The first use of the default **small** model downloads about 500 MB into `C:\AuraCut_Workspace\models` and may take several minutes. Watch the stage message and wait; later uses reuse it. The optional **base** model is smaller and faster but can be less accurate. The first use of base also downloads it.
+5. Open `C:\AuraCut_Workspace\Output_Renders` in File Explorer and play the new video. Check words follow the voice, the active word is gold, and captions leave the lower 380 pixels clear. Note transcription and render times.
+6. Render the same moment with **Clean Ivory**. Play and compare it.
+7. Open the matching `.srt` in Notepad: it should contain numbered captions with clip-relative timestamps. A no-speech clip has an empty SRT.
+8. Click the video and SRT **Back up to Drive** buttons separately; check both appear in your configured Drive folder. AuraCut checks existence and size, not cloud-sync completion.
+9. With captions enabled, render a moment from a music-only video. The video should still be delivered and say **No speech found, rendered without captions**. Speech detection may occasionally mistake music for speech.
+10. Send your teacher (Claude) the result of each step, install time, first model-download time, transcription time, render time, and every red error's exact text. Do not send your API key or `.env` contents.
+
+Captions run locally on the CPU, without PyTorch. Only engine installation and first model downloads need internet; inference works from the cached model. Choose Auto, English, Urdu or Hindi for the spoken language, and either as-spoken text or translation to English. Accuracy and script shaping still need checking on your own PC. Models and temporary audio stay in the local workspace; models are never sent to Drive. If the optional engine is missing, a requested render continues without captions and gives a warning. If downloading or transcription fails, the job reports the cause and fix instead of silently continuing.
 
 ## Re-check the fixes on your PC
 
