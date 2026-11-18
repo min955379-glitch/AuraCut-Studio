@@ -32,7 +32,7 @@
 - The old reference files were absent from this checkout; the implementation uses a new design rather than importing them.
 
 ### Not done
-- Drive render backups failed with a size mismatch on the user's PC; the fix below needs verification.
+- Earlier manual Drive render backups failed with a size mismatch; the user subsequently reported that Phase 3B automatic Drive backup works.
 - AI scoring, URL ingest, music, publishing and other later-phase features are not built.
 
 ### Verified by user
@@ -76,10 +76,23 @@
 - Added mocked Roman, mode, cache, Drive, pending retry, and file-label tests. Linux regression run: 79 tests, 77 passed and 2 skipped (optional speech engine/real transcription unavailable); real generated-video FFmpeg render and subtitle burn passed. A separate FFmpeg burn selected the bundled font for Hindi/Urdu sample glyphs.
 
 ### Not done
-- Roman quality depends on the AI model and must be judged by the user. Mocked tests do NOT prove this works on the user's PC; real AI conversion, script display, Windows AMF, Drive and backup recovery require the checklist. Network access to actual Gemini/Ollama and model hosting was not available in this sandbox.
+- Roman spelling quality depends on the AI model. Mocked tests do NOT prove every Windows or Drive recovery case; no real Gemini/Ollama conversion was tested in this sandbox.
 
 ### Verified by user
-- Not yet for Phase 3B.
+- User reports English, Roman Hindi, Roman Urdu, and Original captions and automatic Drive backup work on their PC. The captions are accurate but appear too small and plain to them.
+
+## Phase 3C — Ollama auto-start only
+
+### Done
+- The Windows launcher checks local Ollama, starts its tray app or hidden server when needed, waits up to 20 seconds, and reports the result without preventing AuraCut startup if Ollama is unavailable.
+- Auto-start defaults to enabled and can be disabled in `.env`; a missing default model is reported with the exact pull command, never downloaded automatically. Ollama is not stopped when AuraCut closes.
+- Added mocked launcher tests for the running, starting, timeout, missing, disabled, and model-check cases. Linux regression run: 100 tests, 97 passed and 3 skipped (optional speech engine, NumPy, or font inspection unavailable). Mocked tests do NOT prove this works on the user's PC.
+
+### Not done
+- User verification of Phase 3C auto-start on Windows is still needed. The professional caption styling and preview described in the attached broader prompt were not implemented: the user's current request explicitly restricts this turn to Ollama auto-start.
+
+### Verified by user
+- Not yet for Phase 3C auto-start.
 
 ### Ideas for later
-- Caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.
+- Larger professional captions, styling options and a caption-style preview; caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.
