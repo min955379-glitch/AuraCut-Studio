@@ -39,6 +39,8 @@ def submit(label, func, *args):
         except Exception as exc:
             if isinstance(exc, AppError):
                 info = error_data(exc.what_failed, exc.real_cause, exc.fix)
+                if getattr(exc, 'technical_details', None):
+                    info['technical_details'] = exc.technical_details
             else:
                 info = error_data(label, '{}: {}'.format(type(exc).__name__, exc),
                                   'Check the reported cause, FFmpeg, local workspace access and free space, then retry.')

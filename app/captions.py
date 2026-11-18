@@ -7,6 +7,9 @@ import re
 import subprocess
 import sys
 import threading
+import traceback
+import wave
+import tempfile
 import time
 from collections import deque
 from pathlib import Path
@@ -43,7 +46,7 @@ def _safe_error(text):
     return re.sub(r'(https?://)[^\s/@]+:[^\s/@]+@', r'\1[redacted]@', text)
 
 
-def run_process(args, cwd, timeout, progress, initial_stage, on_line=None, env=None):
+def run_process(args, cwd, timeout, progress, initial_stage, on_line=None, env=None, stderr_lines=None):
     """Run a bounded background subprocess, showing an elapsed-time heartbeat."""
     try:
         process = subprocess.Popen(args, cwd=str(cwd), env=env, stdin=subprocess.DEVNULL,
@@ -76,7 +79,10 @@ def run_process(args, cwd, timeout, progress, initial_stage, on_line=None, env=N
             process.kill()
     def read_stderr():
         for line in process.stderr:
-            tail.append(_safe_error(line.strip())[-1200:])
+            safe_line = _safe_error(line.rstrip('\r\n'))
+            tail.append(safe_line[-1200:])
+            if stderr_lines is not None:
+                stderr_lines.append(safe_line)
     def heartbeat():
         while not done.wait(10):
             with lock:
@@ -159,7 +165,7 @@ def transcribe_words(model, wav_path, clip_length, language, text_mode, on_segme
     """Whisper timestamps are relative to the extracted clip, never the source video."""
     if language not in LANGUAGES or text_mode not in TEXT_MODES:
         raise AppError('Captions options', 'Unsupported spoken language or text mode.', 'Choose one of the listed captions options.')
-    segments, _ = model.transcribe(str(wav_path), language=LANGUAGES[language], task=TEXT_MODES[text_mode],
+    segments, _ = model.transcribe(wav_path, language=LANGUAGES[language], task=TEXT_MODES[text_mode],
                                    word_timestamps=True, vad_filter=True)
     words = []
     for segment in segments:
@@ -179,7 +185,7 @@ def transcribe_words(model, wav_path, clip_length, language, text_mode, on_segme
     return words
 
 
-def transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_length, progress=lambda *_: None):
+def _transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_length, progress=lambda *_: None):
     if model_size not in ('small', 'base') or language not in LANGUAGES or text_mode not in TEXT_MODES:
         raise AppError('Captions options', 'Unsupported speech model, language, or text mode.', 'Choose one of the listed captions options.')
     output = wav_path.parent / 'words.json'
@@ -189,17 +195,37 @@ def transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_l
                 'HF_HUB_DISABLE_PROGRESS_BARS': '1', 'HF_HUB_DISABLE_IMPLICIT_TOKEN': '1', 'PYTHONIOENCODING': 'utf-8'})
     args = [sys.executable, '-u', '-m', 'app.speech_worker', str(wav_path), str(model_dir), model_size,
             language, text_mode, str(clip_length), str(output)]
+    phase = ['model']
+    stderr_lines = []
     def worker_progress(line, set_stage):
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
             return  # Non-JSON library output is retained for diagnostics on failure.
         if isinstance(event, dict) and isinstance(event.get('stage'), str):
+            if event.get('phase') in ('model', 'download', 'transcribe'):
+                phase[0] = event['phase']
+            logger.info('Captions: %s', event['stage'])
             set_stage(event['stage'])
-    ok, detail = run_process(args, ROOT, SPEECH_TIMEOUT, progress, 'Preparing speech model', worker_progress, env)
+    ok, detail = run_process(args, ROOT, SPEECH_TIMEOUT, progress, 'Preparing speech model', worker_progress, env, stderr_lines)
     if not ok:
-        raise AppError('Speech transcription', 'Speech model download or transcription failed: {}'.format(detail),
-                       'Check internet access for the first model download, free local disk space and the captions engine, then retry.')
+        what = {'model': 'Speech model loading', 'download': 'Speech model download', 'transcribe': 'Speech transcription'}[phase[0]]
+        lines = stderr_lines or [detail]
+        trace = '\n'.join(lines)
+        # Keep the complete subprocess traceback on local disk, as well as in the app log.
+        logger.error('%s traceback:\n%s', what, trace)
+        try:
+            log_dir = wav_path.parent.parent.parent / 'logs'
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / 'captions.log').open('a', encoding='utf-8') as log:
+                log.write('\n{}\n{}\n'.format(what, trace))
+        except OSError as exc:
+            detail += '; Could not write captions.log: {}'.format(exc)
+        fix = ('Check internet access and local disk space, then retry.' if phase[0] == 'download' else
+               'Check the technical details, local disk space and captions engine, then retry.')
+        err = AppError(what, detail, fix)
+        err.technical_details = '\n'.join(lines[-10:])
+        raise err
     try:
         words = json.loads(output.read_text(encoding='utf-8'))
         if not isinstance(words, list):
@@ -208,6 +234,46 @@ def transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_l
     except (OSError, UnicodeError, ValueError) as exc:
         raise AppError('Speech transcription', 'Could not read the word timestamps: {}'.format(exc),
                        'Check local workspace permissions and retry the transcription.') from exc
+
+
+def transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_length, progress=lambda *_: None):
+    try:
+        return _transcribe_clip(wav_path, model_dir, model_size, language, text_mode, clip_length, progress)
+    except Exception as exc:
+        if getattr(exc, 'technical_details', None):
+            raise
+        trace = _safe_error(traceback.format_exc())
+        logger.error('Speech transcription traceback:\n%s', trace)
+        try:
+            log_dir = wav_path.parent.parent.parent / 'logs'
+            log_dir.mkdir(parents=True, exist_ok=True)
+            with (log_dir / 'captions.log').open('a', encoding='utf-8') as log:
+                log.write('\nSpeech transcription\n{}\n'.format(trace))
+        except OSError as log_error:
+            trace += '\nCould not write captions.log: {}'.format(log_error)
+            logger.error('Could not write captions.log: %s | Fix: Check workspace permissions.', log_error)
+        if not isinstance(exc, AppError):
+            exc = AppError('Speech transcription', '{}: {}'.format(type(exc).__name__, exc),
+                           'Check technical details and the local captions engine, then retry.')
+        exc.technical_details = '\n'.join(trace.splitlines()[-10:])
+        raise exc
+
+
+def test_engine(config, progress=lambda *_: None):
+    installed, reason = engine_status()
+    if not installed:
+        raise AppError('Captions engine test', reason, 'Click Install captions engine in PeakCut, then retry.')
+    folder = workspace(config) / 'Output_Renders'
+    with tempfile.TemporaryDirectory(prefix='._peakcut_test_', dir=str(folder)) as temporary:
+        wav_path = Path(temporary) / 'silence.wav'
+        with wave.open(str(wav_path), 'wb') as wav:
+            wav.setparams((1, 2, 16000, 0, 'NONE', 'not compressed'))
+            wav.writeframes(b'\0\0' * 32000)
+        words = transcribe_clip(wav_path, model_folder(config), 'small', 'en', 'as_spoken', 2, progress)
+        if words:
+            raise AppError('Captions engine test', 'The engine detected speech in generated silence: {}'.format(words),
+                           'Check the captions engine installation and retry.')
+    return {'message': 'PASS: model loaded and 2 seconds of silence transcribed; no speech found.'}
 
 
 def group_words(words, max_words=5, max_line_chars=24):

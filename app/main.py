@@ -213,6 +213,21 @@ def backup(choice: FileChoice):
     return result
 
 
+@app.post('/api/backup/start')
+def backup_start(choice: FileChoice):
+    config = settings()
+    storage.safe_file(config, choice.folder, choice.name)
+    storage.drive_folder(config)
+    job_id = jobs.submit('Drive backup', storage.backup_file, config, choice.folder, choice.name)
+    return {'ok': True, 'job_id': job_id}
+
+
+@app.post('/api/captions/test')
+def captions_test():
+    job_id = jobs.submit('Captions engine test', captions.test_engine, settings())
+    return {'ok': True, 'job_id': job_id}
+
+
 class ScriptRequest(BaseModel):
     topic: str = Field(min_length=1, max_length=4000)
     scene_count: int = Field(ge=1, le=8)
