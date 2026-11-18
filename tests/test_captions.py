@@ -233,10 +233,13 @@ class EngineTests(unittest.TestCase):
             fake_errors.LocalEntryNotFoundError = CacheMiss
             modules = {'faster_whisper': fake_fw, 'faster_whisper.utils': fake_utils,
                        'huggingface_hub': fake_hub, 'huggingface_hub.errors': fake_errors}
-            with patch.dict(sys.modules, modules), patch.object(sys, 'argv', ['worker', str(wav), str(root), 'small', 'ur', 'translate', '15', str(output)]), patch('app.speech_worker.stage') as stage:
+            with patch.dict(sys.modules, modules), patch.object(sys, 'argv', ['worker', str(wav), str(root), 'small', 'ur', 'translate', '15', str(output)]), patch('app.speech_worker.stage') as stage, patch('app.speech_worker.read_clip_audio', return_value='audio'):
                 speech_worker.main()
-            self.assertEqual([True, False], [call[1]['local_files_only'] for call in calls])
-            self.assertEqual(str(root), calls[1][1]['cache_dir'])
+            self.assertEqual([True], [call[1]['local_files_only'] for call in calls])
+            self.assertEqual(str(root), calls[0][1]['cache_dir'])
+            self.assertEqual(('small',), factory.call_args.args)
+            self.assertEqual(str(root), factory.call_args.kwargs['download_root'])
+            self.assertNotIn('local_files_only', factory.call_args.kwargs)
             self.assertEqual('cpu', factory.call_args.kwargs['device'])
             self.assertEqual('int8', factory.call_args.kwargs['compute_type'])
             self.assertEqual('translate', model.transcribe.call_args.kwargs['task'])

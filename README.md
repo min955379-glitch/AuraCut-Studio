@@ -19,7 +19,7 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
 3. Switch to the Phase 3 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/6d8006e2-auracut-studio
+   git switch arena/2fc4d05a-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -75,6 +75,15 @@ If port 8000 belongs to another program, the launcher reports the process when W
 8. Paste the result of every step, the analysis and render times, and any red error text exactly to your teacher (Claude). Do not include your API key or `.env` contents.
 
 PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 30 frames per second. If a video is at least 15 seconds but shorter than the requested length, PeakCut uses the whole video. Finished files are never overwritten. Jobs are cleared when the app stops.
+
+## Check the Phase 3 fixes
+
+1. Close the old black AuraCut window, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser. You do **not** need to reinstall the captions engine for this fix; no dependency pins changed.
+2. In **System health**, click **Test captions engine**. It loads the small model and transcribes two seconds of generated silence locally. Wait for **PASS**; the first use may download about 500 MB. A saved complete model is reused. If it fails, expand **Show technical details** in the red error and copy the text.
+3. Find a clear speech moment, tick **Add captions**, choose **Clean Ivory** and **As spoken**, then render. Check the words and gold highlight are in sync.
+4. Back up the video and the matching `.srt` separately. Watch the copying progress. Verification can take up to 90 seconds; if incomplete, the local file and partial Drive copy remain. Wait and click backup again. Check both Drive copies have the same size as the originals. A same-sized existing file is reported as **Already backed up**; unrelated files with different sizes are never overwritten.
+5. Find moments successfully, then try a two-second video. The failed analysis should not show old results, and the cause should be beside **Failed**.
+6. Tell teacher Claude the result of each step, times, and any red error and technical details. Do not share API keys. Full speech tracebacks are also saved locally in `C:\AuraCut_Workspace\logs\captions.log`.
 
 ## Try captions on your PC
 

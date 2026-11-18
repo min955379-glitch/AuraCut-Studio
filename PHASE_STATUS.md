@@ -32,11 +32,11 @@
 - The old reference files were absent from this checkout; the implementation uses a new design rather than importing them.
 
 ### Not done
-- The user has not reported the Drive render backup or short-video error checklist results.
+- Drive render backups failed with a size mismatch on the user's PC; the fix below needs verification.
 - AI scoring, URL ingest, music, publishing and other later-phase features are not built.
 
 ### Verified by user
-- User reports analysis and all three framing modes work on both vertical and wide videos on their PC; renders took under one minute.
+- User reports analysis and all three framing modes work on both vertical and wide videos on their PC; renders took under one minute. The two-second video displayed the expected short-video error.
 
 ## Phase 3 — captions
 
@@ -46,11 +46,26 @@
 - Added mocked builder, transcription, install, render, path-safety and backup tests, plus a real synthetic five-second FFmpeg ASS burn when available. Existing Phase 1/2 tests remain in the suite.
 
 ### Not done
-- First model download and actual speech transcription have not been run in this sandbox; network access to the model host is unavailable here.
+- First model download and actual speech transcription have not been run in this sandbox; network access to the model host is unavailable here. The user independently downloaded the small model successfully, but captioned renders failed with `TypeError: open() got an unexpected keyword argument 'metadata_errors'`.
 - Mocked tests and a Linux FFmpeg burn do NOT prove Windows operation, AMD AMF, Urdu/Hindi shaping, real speech accuracy or Drive behavior on the user's PC. Complete the checklist.
 
 ### Verified by user
-- Not yet.
+- The user reports the captions engine install button succeeded and its import was verified. A standalone small-model constructor downloaded and loaded successfully; captioned renders did not work.
+
+## Phase 3 — targeted fixes
+
+### Done
+- Source investigation: faster-whisper 1.2.1 `audio.decode_audio` calls `av.open(input_file, mode="r", metadata_errors="ignore")` during transcription of a file path. Its model constructor does not decode audio. A source search found no other speech-engine use of that keyword. Thus the reported failure points to the audio-opening path, not the successful model constructor. Tested PyAV 12.3.0, 13.1.0, 14.2.0, 15.1.0, 16.1.0, 17.0.0 and 18.1.0 accepted this keyword in the Linux sandbox. The user's PyAV version and original traceback are unknown, so a specific version conflict or the exact Windows callee is NOT proven. No dependency pins were changed.
+- Avoid the problematic audio-opening path by reading PeakCut's already-extracted mono 16 kHz PCM WAV into a NumPy array; faster-whisper 1.2.1 accepts arrays and skips `decode_audio`. Load models with the same `WhisperModel(size, device='cpu', compute_type='int8', download_root=...)` shape as the user's successful test; force local-only when a complete cached model exists. Full worker tracebacks are recorded in the local workspace `logs/captions.log` and the last 10 lines appear in technical details. Model download and transcription have separate progress/error labels. Added the generated-silence engine test.
+- Drive copies now stream, flush and fsync; verification polls every two seconds for up to 90 seconds. Incomplete copies are kept and marked; retries do not overwrite unrelated existing files. Matching name and size is reported as already backed up. The UI displays copy progress.
+- PeakCut clears old analysis results at the start and on failure and shows the failure cause beside its status.
+- Added mocked coverage for cache reuse, separate failures, tracebacks, Drive retries/polling and failed-analysis UI. The 62-test suite passed in Linux (one real-transcription test skipped because the small model is not cached). A generated two-second FFmpeg PCM waveform loaded into the same samples as PyAV. The real two-second silence transcription test skips if the model is not locally cached. No models were downloaded in this sandbox.
+
+### Not done
+- These fixes, real speech transcription, Google Drive size polling and the engine test have not been verified on the user's Windows PC. Mocked tests do NOT prove it works there. The sandbox cannot reproduce the original Windows PyAV error without the user's missing PyAV version and traceback.
+
+### Verified by user
+- Not yet for the targeted fixes.
 
 ### Ideas for later
 - Romanized Urdu/Hindi captions, caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.

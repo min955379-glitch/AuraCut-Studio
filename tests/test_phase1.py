@@ -84,22 +84,28 @@ class StorageTests(unittest.TestCase):
         (self.root / 'drive').mkdir()
         (self.root / 'work' / 'Input_Media' / 'test.mp4').write_bytes(b'video data')
 
-    def test_backup_success_and_no_overwrite(self):
+    def test_backup_success_and_already_backed_up(self):
         result = storage.backup_file(self.config, 'Input_Media', 'test.mp4')
         self.assertTrue(result['ok'])
         self.assertEqual(b'video data', (self.root / 'drive' / 'test.mp4').read_bytes())
-        with self.assertRaises(AppError) as context:
-            storage.backup_file(self.config, 'Input_Media', 'test.mp4')
-        self.assertIn('not overwritten', context.exception.real_cause)
+        result = storage.backup_file(self.config, 'Input_Media', 'test.mp4')
+        self.assertIn('Already backed up', result['message'])
 
-    def test_size_mismatch_removes_incomplete_copy(self):
-        def partial(src, dst, length):
-            dst.write(b'x')
-        with patch.object(storage.shutil, 'copyfileobj', side_effect=partial):
+    def test_size_mismatch_keeps_incomplete_copy(self):
+        target = self.root / 'drive' / 'test.mp4'
+        real_fsync = storage.os.fsync
+        def truncate(fd):
+            real_fsync(fd)
+            with target.open('r+b') as f:
+                f.truncate(1)
+        with patch.object(storage.os, 'fsync', side_effect=truncate), patch.object(storage, 'VERIFY_TIMEOUT', 0):
             with self.assertRaises(AppError) as context:
                 storage.backup_file(self.config, 'Input_Media', 'test.mp4')
         self.assertIn('Size mismatch', context.exception.real_cause)
-        self.assertFalse((self.root / 'drive' / 'test.mp4').exists())
+        self.assertTrue(target.exists())
+        self.assertTrue(storage.list_files(self.config)[0]['backup_incomplete'])
+        self.assertTrue(storage.backup_file(self.config, 'Input_Media', 'test.mp4')['ok'])
+        self.assertEqual(b'video data', target.read_bytes())
 
     def test_missing_drive_is_recoverable(self):
         self.config['AURACUT_DRIVE_BACKUP'] = str(self.root / 'missing')
