@@ -1,8 +1,8 @@
-# AuraCut Studio — Phase 3B: Roman captions and automatic Drive backup
+# AuraCut Studio — Phase 3C: Ollama auto-start
 
 AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
 
-## Get Phase 3B
+## Get Phase 3C
 
 1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
@@ -16,10 +16,10 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
    git fetch origin
    ```
 
-3. Switch to the Phase 3B work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
+3. Switch to the Phase 3C work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/faafd0a1-auracut-studio
+   git switch arena/d3ad0999-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -42,6 +42,35 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
 5. Keep the PowerShell or batch window open while using AuraCut. Press Ctrl+C in that window to stop the server.
 
 If port 8000 belongs to another program, the launcher reports the process when Windows can identify it. Close that program yourself and retry. AuraCut never stops it for you. If AuraCut is already running, the launcher opens the existing page.
+
+## Ollama auto-start
+
+AuraCut checks `http://127.0.0.1:11434` before starting. If Ollama is already running, the black window says **Ollama is already running**. Otherwise it tries to start Ollama and waits up to 20 seconds. A successful start says **Starting Ollama...** and then **Ollama is ready**. AuraCut does not stop Ollama when it closes.
+
+This is enabled by default, including when your existing `.env` has no new setting. To turn it off, open PowerShell in your AuraCut folder and run:
+
+```powershell
+notepad .env
+```
+
+Add `AURACUT_START_OLLAMA=false`, or change the existing line if it is already there. Save the file and restart AuraCut. Use `true` to turn auto-start back on. The app still checks an already-running Ollama when auto-start is off.
+
+If Ollama is not installed or does not start, the window explains the cause and fix; AuraCut continues starting and can still use Gemini. Install Ollama from `https://ollama.com` if necessary. The local startup log is `C:\AuraCut_Workspace\logs\ollama-start.log` when available. Do not paste secrets from logs.
+
+If the window says the default model is missing, install it yourself in PowerShell; AuraCut does not download it automatically:
+
+```powershell
+ollama pull qwen2.5:7b-instruct-q4_K_M
+```
+
+### Check on your PC
+
+1. Close the old AuraCut black window. Right-click Ollama's tray icon near the Windows clock and choose Quit.
+2. In File Explorer, double-click `Start AuraCut.bat`. The black window should say **Starting Ollama...** then **Ollama is ready**. In the browser's **System health**, check **Ollama: PASS**.
+3. Close the AuraCut black window, but leave Ollama running. Double-click `Start AuraCut.bat` again. The window should say **Ollama is already running**.
+4. Send your teacher the result of each step and the exact warning text, if any. Do not send your API key or `.env` contents.
+
+Mocked tests do not prove auto-start works on your Windows PC. The Ollama PASS line also requires the configured model to be installed.
 
 ## Configure optional Gemini and Drive settings
 
