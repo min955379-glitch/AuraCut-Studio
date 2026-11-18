@@ -186,7 +186,7 @@ def list_files(config):
                 except OSError as exc:
                     raise AppError('File list', 'Cannot check backup {}: {}'.format(candidate, exc),
                                    'Check Google Drive folder access, then refresh the list.') from exc
-            files.append({'name': path.name, 'size': size, 'folder': folder, 'backed_up': backed_up, 'backup_incomplete': backup_incomplete})
+            files.append({'name': path.name, 'size': size, 'folder': folder, 'backed_up': backed_up, 'backup_incomplete': backup_incomplete, 'drive_available': bool(drive)})
     return files
 
 

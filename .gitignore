@@ -22,6 +22,10 @@ AuraCut_Workspace/
 Input_Media/
 Output_Renders/
 models/
+caption_cache/
+backup_state/
+auto_backup_state.json
+auto_backup_state.tmp
 *.srt
 *.vtt
 *.mp4

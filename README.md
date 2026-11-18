@@ -1,8 +1,8 @@
-# AuraCut Studio — Phase 3: PeakCut captions
+# AuraCut Studio — Phase 3B: Roman captions and automatic Drive backup
 
 AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
 
-## Get Phase 3
+## Get Phase 3B
 
 1. Open PowerShell. Go to your AuraCut folder. If you saved it in a different location, use that folder instead:
 
@@ -16,10 +16,10 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
    git fetch origin
    ```
 
-3. Switch to the Phase 3 work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
+3. Switch to the Phase 3B work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/2fc4d05a-auracut-studio
+   git switch arena/faafd0a1-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -63,6 +63,37 @@ If port 8000 belongs to another program, the launcher reports the process when W
 6. Ollama defaults to `qwen2.5:7b-instruct-q4_K_M` at `http://127.0.0.1:11434`. Keep Ollama running. Save `.env`, then refresh health on the page.
 7. Never share or commit `.env` or your API key.
 
+## Try Phase 3B
+
+1. If your existing `.env` already has `AURACUT_DRIVE_BACKUP` set, automatic render backup defaults to ON even without new lines. To make it explicit, in PowerShell in your repository folder run:
+
+   ```powershell
+   notepad .env
+   ```
+
+   Add these lines at the end, then save and close Notepad. If either line already exists, change it instead of adding a duplicate:
+
+   ```text
+   AURACUT_AUTO_BACKUP=true
+   AURACUT_AUTO_BACKUP_INPUTS=false
+   ```
+
+   The second line keeps source uploads from being automatically copied. Set the first to `false` to turn automatic backup off. Restart AuraCut after editing `.env`.
+2. Close the old black window, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser. In PeakCut tick **Add captions**. The four modes appear; **Roman Hindi + English words** is selected by default.
+3. Find a Hindi/Urdu speech moment and render in Roman Hindi. Check Latin spelling, English words, timing, and gold highlighting. Render the same moment in Roman Urdu, English only, and Original script. A repeated Roman render with the same source, clip, speech model and language uses the saved conversion, even if the caption style changes. If AI conversion fails, original text is used with a warning; fallback line timing is approximate.
+4. Open the matching `.srt` in Notepad and compare its words with the video. A no-speech render creates no SRT.
+5. Watch the separate Drive backup message after the video appears. It should say **Backed up to Drive**. Verify file sizes: in PowerShell, run the first line below; for the second, replace the example path with your actual Drive folder.
+
+   ```powershell
+   Get-ChildItem -LiteralPath 'C:\AuraCut_Workspace\Output_Renders' | Select-Object Name,Length
+   Get-ChildItem -LiteralPath 'G:\My Drive\AuraCut_Backup' | Select-Object Name,Length
+   ```
+
+   Compare the numbers in **Length** for the same `.mp4` and `.srt`. Size verification does not guarantee cloud sync has completed.
+6. Quit Google Drive for desktop and render another clip. The local render should finish and show a backup-pending warning. Start Drive again and click **Back up all pending files**. Do not remove partial copies; unrelated files with the same name are never overwritten.
+7. Render a music-only moment and check there is no new empty `.srt`. Speech detection can mistake music for speech.
+8. Paste each result, times, red errors and technical details to teacher Claude, plus 10 lines of Roman captions for spelling review. Do not paste your API key or `.env`.
+
 ## Try PeakCut on your PC
 
 1. Close the old black AuraCut window. In File Explorer, open your AuraCut repository folder and double-click `Start AuraCut.bat`.
@@ -80,7 +111,7 @@ PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 
 
 1. Close the old black AuraCut window, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser. You do **not** need to reinstall the captions engine for this fix; no dependency pins changed.
 2. In **System health**, click **Test captions engine**. It loads the small model and transcribes two seconds of generated silence locally. Wait for **PASS**; the first use may download about 500 MB. A saved complete model is reused. If it fails, expand **Show technical details** in the red error and copy the text.
-3. Find a clear speech moment, tick **Add captions**, choose **Clean Ivory** and **As spoken**, then render. Check the words and gold highlight are in sync.
+3. Find a clear speech moment, tick **Add captions**, choose **Clean Ivory** and **Original script**, then render. Check the words and gold highlight are in sync.
 4. Back up the video and the matching `.srt` separately. Watch the copying progress. Verification can take up to 90 seconds; if incomplete, the local file and partial Drive copy remain. Wait and click backup again. Check both Drive copies have the same size as the originals. A same-sized existing file is reported as **Already backed up**; unrelated files with different sizes are never overwritten.
 5. Find moments successfully, then try a two-second video. The failed analysis should not show old results, and the cause should be beside **Failed**.
 6. Tell teacher Claude the result of each step, times, and any red error and technical details. Do not share API keys. Full speech tracebacks are also saved locally in `C:\AuraCut_Workspace\logs\captions.log`.
@@ -93,12 +124,12 @@ PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 
 4. Select a video with clear speech and click **Find best moments**. Tick **Add captions**, select **Bold Gold**, and render a moment. The first use of the default **small** model downloads about 500 MB into `C:\AuraCut_Workspace\models` and may take several minutes. Watch the stage message and wait; later uses reuse it. The optional **base** model is smaller and faster but can be less accurate. The first use of base also downloads it.
 5. Open `C:\AuraCut_Workspace\Output_Renders` in File Explorer and play the new video. Check words follow the voice, the active word is gold, and captions leave the lower 380 pixels clear. Note transcription and render times.
 6. Render the same moment with **Clean Ivory**. Play and compare it.
-7. Open the matching `.srt` in Notepad: it should contain numbered captions with clip-relative timestamps. A no-speech clip has an empty SRT.
+7. Open the matching `.srt` in Notepad: it should contain numbered captions with clip-relative timestamps. A no-speech clip has no SRT.
 8. Click the video and SRT **Back up to Drive** buttons separately; check both appear in your configured Drive folder. AuraCut checks existence and size, not cloud-sync completion.
 9. With captions enabled, render a moment from a music-only video. The video should still be delivered and say **No speech found, rendered without captions**. Speech detection may occasionally mistake music for speech.
 10. Send your teacher (Claude) the result of each step, install time, first model-download time, transcription time, render time, and every red error's exact text. Do not send your API key or `.env` contents.
 
-Captions run locally on the CPU, without PyTorch. Only engine installation and first model downloads need internet; inference works from the cached model. Choose Auto, English, Urdu or Hindi for the spoken language, and either as-spoken text or translation to English. Accuracy and script shaping still need checking on your own PC. Models and temporary audio stay in the local workspace; models are never sent to Drive. If the optional engine is missing, a requested render continues without captions and gives a warning. If downloading or transcription fails, the job reports the cause and fix instead of silently continuing.
+Captions run locally on the CPU, without PyTorch. Speech inference works from the cached model without internet. Roman conversion uses Gemini when configured (caption text is sent to Google), then local Ollama if Gemini fails. Choose Auto, English, Urdu or Hindi for the spoken language and one of the four caption language modes. Accuracy and script shaping still need checking on your own PC. Models and temporary audio stay in the local workspace; models are never sent to Drive. If the optional engine is missing, a requested render continues without captions and gives a warning. If downloading or transcription fails, the job reports the cause and fix instead of silently continuing.
 
 ## Re-check the fixes on your PC
 
@@ -111,7 +142,7 @@ Captions run locally on the CPU, without PyTorch. Only engine installation and f
 
 A successful Gemini test confirms one tiny request worked at that moment; it does not guarantee a later generation will succeed. A refreshed page starts with the untested status again.
 
-All processing uses `C:\AuraCut_Workspace\Input_Media` and `C:\AuraCut_Workspace\Output_Renders`, not a Drive path. The app only copies a file to Drive when you click its backup button. A Drive failure does not delete your local file.
+All processing uses `C:\AuraCut_Workspace\Input_Media` and `C:\AuraCut_Workspace\Output_Renders`, not a Drive path. If automatic backup is enabled, finished PeakCut files are also copied in the background. Manual backup buttons remain available. A Drive failure does not delete your local file.
 
 ## Tests and Phase 0 check
 

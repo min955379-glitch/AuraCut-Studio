@@ -147,3 +147,21 @@ async def generate_script(topic, count, config):
         logger.warning('Prompt too long: %s | Fix: requesting a shorter complete script (retry %s of 2).', details, attempt + 1)
         prompt += '\nThe previous response had overlong prompts ({}). Rewrite all {} scenes, keeping each video_prompt at most {} characters; do not cut words. Return the same JSON format.'.format(details, count, MAX_YT_CREATE_CHARS)
     raise AssertionError('Unreachable')
+
+
+async def route_validated(prompt, config, validator):
+    """Use the existing providers in order, validating each response before fallback."""
+    failures = []
+    if config.get('GEMINI_API_KEY', '').strip() and config.get('GEMINI_MODEL', '').strip():
+        try:
+            return validator(await gemini_generate(prompt, config)), 'Gemini'
+        except Exception as exc:
+            failures.append('Gemini: {}'.format(reason(exc, config)))
+            logger.warning('Roman conversion Gemini: %s | Fix: Check Gemini configuration; trying Ollama.', failures[-1])
+    else:
+        failures.append('Gemini: not configured')
+    try:
+        return validator(await ollama_generate(prompt, config)), 'Ollama'
+    except Exception as exc:
+        failures.append('Ollama: {}'.format(reason(exc, config)))
+        raise ValueError('; '.join(failures)) from exc
