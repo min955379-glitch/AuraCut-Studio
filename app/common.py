@@ -57,7 +57,7 @@ class AppError(Exception):
 
 
 def error_data(what, cause, fix, config=None):
-    result = {'ok': False, 'what_failed': str(what), 'real_cause': clean(cause, config), 'fix': str(fix)}
+    result = {'ok': False, 'what_failed': str(what), 'real_cause': clean(cause, config), 'fix': str(fix), 'technical_details': clean(cause, config)}
     logger.error('%s | Cause: %s | Fix: %s', result['what_failed'], result['real_cause'], result['fix'])
     return result
 

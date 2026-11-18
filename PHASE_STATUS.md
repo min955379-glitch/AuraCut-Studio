@@ -46,11 +46,11 @@
 - Added mocked builder, transcription, install, render, path-safety and backup tests, plus a real synthetic five-second FFmpeg ASS burn when available. Existing Phase 1/2 tests remain in the suite.
 
 ### Not done
-- First model download and actual speech transcription have not been run in this sandbox; network access to the model host is unavailable here. The user independently downloaded the small model successfully, but captioned renders failed with `TypeError: open() got an unexpected keyword argument 'metadata_errors'`.
+- Actual speech transcription has not been run in this sandbox because the model host is unavailable here. The earlier Windows `metadata_errors` failure was subsequently fixed and the user reports captions now run.
 - Mocked tests and a Linux FFmpeg burn do NOT prove Windows operation, AMD AMF, Urdu/Hindi shaping, real speech accuracy or Drive behavior on the user's PC. Complete the checklist.
 
 ### Verified by user
-- The user reports the captions engine install button succeeded and its import was verified. A standalone small-model constructor downloaded and loaded successfully; captioned renders did not work.
+- The user reports the captions engine install succeeded, saved-model loading and transcription now work, and a 30-second clip takes about 50 seconds to transcribe. Hindi/Urdu as-spoken captions appeared in Devanagari.
 
 ## Phase 3 — targeted fixes
 
@@ -62,10 +62,24 @@
 - Added mocked coverage for cache reuse, separate failures, tracebacks, Drive retries/polling and failed-analysis UI. The 62-test suite passed in Linux (one real-transcription test skipped because the small model is not cached). A generated two-second FFmpeg PCM waveform loaded into the same samples as PyAV. The real two-second silence transcription test skips if the model is not locally cached. No models were downloaded in this sandbox.
 
 ### Not done
-- These fixes, real speech transcription, Google Drive size polling and the engine test have not been verified on the user's Windows PC. Mocked tests do NOT prove it works there. The sandbox cannot reproduce the original Windows PyAV error without the user's missing PyAV version and traceback.
+- Google Drive size polling and the engine test were not specifically reported as verified. Mocked tests do NOT prove Windows operation; the original PyAV failure was not reproducible here without the user's original traceback and PyAV version.
 
 ### Verified by user
-- Not yet for the targeted fixes.
+- User confirms saved-model loading and caption transcription now work on Windows; the metadata_errors failure is fixed.
+
+## Phase 3B — Roman captions and automatic backup
+
+### Done
+- Four caption language modes: English translation, Roman Hindi, Roman Urdu and original script. Gemini-first/Ollama Roman conversion uses bounded chunks, validates word alignment and English preservation, retries then falls back to timed lines or original text with a warning. Converted clips are cached locally across styles.
+- No-speech renders no longer create an empty SRT. Render output is published before Drive copying; background automatic backup tracks pending files and supports explicit retry. Source uploads are not auto-backed-up by default.
+- The existing merged OFL font covers tested Devanagari and Arabic/Urdu sample glyphs and has `deva`, `dev2`, and `arab` shaping tables; no additional font was added. Real display on Windows still needs checking.
+- Added mocked Roman, mode, cache, Drive, pending retry, and file-label tests. Linux regression run: 79 tests, 77 passed and 2 skipped (optional speech engine/real transcription unavailable); real generated-video FFmpeg render and subtitle burn passed. A separate FFmpeg burn selected the bundled font for Hindi/Urdu sample glyphs.
+
+### Not done
+- Roman quality depends on the AI model and must be judged by the user. Mocked tests do NOT prove this works on the user's PC; real AI conversion, script display, Windows AMF, Drive and backup recovery require the checklist. Network access to actual Gemini/Ollama and model hosting was not available in this sandbox.
+
+### Verified by user
+- Not yet for Phase 3B.
 
 ### Ideas for later
-- Romanized Urdu/Hindi captions, caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.
+- Caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.

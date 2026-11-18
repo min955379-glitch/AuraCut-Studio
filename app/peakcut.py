@@ -7,11 +7,12 @@ import shutil
 import subprocess
 import tempfile
 import threading
+import traceback
 from collections import deque
 from pathlib import Path
 
-from app import captions
-from app.common import AppError, logger, workspace
+from app import captions, roman
+from app.common import AppError, clean, logger, workspace
 from app.storage import safe_file
 
 FRAMINGS = ('whole_blur', 'zoom_blur', 'full_screen')
@@ -242,6 +243,8 @@ def publish_temp(temp, folder, stem):
     for number in range(10000):
         name = stem + ('' if number == 0 else '_{}'.format(number)) + '.mp4'
         dest = folder / name
+        if dest.with_suffix('.srt').exists():
+            continue
         try:
             # A same-volume hard link publishes atomically and never replaces an existing file.
             os.link(temp, dest)
@@ -326,9 +329,10 @@ def render(config, filename, start, end, framing, captions_options=None, progres
         if options.get('enabled'):
             style = options.get('style', 'bold_gold')
             language = options.get('language', 'auto')
-            text_mode = options.get('text_mode', 'as_spoken')
+            mode = options.get('mode') or ('english' if options.get('text_mode') == 'translate' else 'original')
+            text_mode = 'translate' if mode == 'english' else 'as_spoken'
             model_size = options.get('model_size', 'small')
-            if style not in captions.STYLES or language not in captions.LANGUAGES or text_mode not in captions.TEXT_MODES or model_size not in ('small', 'base'):
+            if style not in captions.STYLES or language not in captions.LANGUAGES or mode not in roman.MODES or model_size not in ('small', 'base'):
                 raise AppError('Captions options', 'An unsupported captions option was requested.', 'Choose one of the listed captions options.')
             installed, reason = captions.engine_status() if info['audio'] else (True, '')
             if not installed:
@@ -343,17 +347,26 @@ def render(config, filename, start, end, framing, captions_options=None, progres
                     wav = directory / 'clip.wav'
                     extract_clip_audio(source, wav, start, length, progress)
                     words = captions.transcribe_clip(wav, captions.model_folder(config), model_size, language, text_mode, length, progress)
+                if words and mode in ('roman_hindi', 'roman_urdu'):
+                    try:
+                        words, caption_message, roman_warning = roman.convert(config, source, start, end, words, mode, model_size, language, progress)
+                        if roman_warning:
+                            caption_warning = roman_warning
+                    except Exception as exc:
+                        detail = clean('{}: {}'.format(type(exc).__name__, exc), config)
+                        caption_warning = 'Roman conversion failed, used original script. Cause: {}. Fix: Check local workspace, Gemini and Ollama, then retry.'.format(detail)
+                        logger.error('%s\n%s', caption_warning, clean(traceback.format_exc(), config))
                 progress(None, 'Building captions')
-                srt_temp = directory / 'captions.srt'
                 try:
-                    srt_temp.write_text(captions.srt_text(words), encoding='utf-8-sig')
                     if words:
+                        srt_temp = directory / 'captions.srt'
+                        srt_temp.write_text(captions.srt_text(words), encoding='utf-8-sig')
                         (directory / 'captions.ass').write_text(captions.ass_text(words, style), encoding='utf-8')
                         (directory / 'fonts').mkdir()
                         shutil.copy2(captions.FONT_PATH, directory / 'fonts' / 'AuraCutCaption-Bold.ttf')
                         with_captions = True
                     else:
-                        caption_message = 'No speech found, rendered without captions. The SRT is empty.'
+                        caption_message = 'No speech found, rendered without captions. No SRT was created.'
                         logger.info(caption_message)
                 except OSError as exc:
                     raise AppError('Building captions', 'Could not write captions or copy the bundled font: {}'.format(exc),
@@ -410,7 +423,8 @@ def render(config, filename, start, end, framing, captions_options=None, progres
             warnings.append('GPU encode failed, used CPU. Slower. GPU reason: {}. Fix: Check AMD drivers and FFmpeg AMF support.'.format(gpu_error))
         return {'filename': destination.name, 'folder': 'Output_Renders', 'duration': output['duration'],
                 'encoder': encoder, 'warning': ' '.join(warnings), 'caption_message': caption_message,
-                'captions_burned': with_captions, 'srt_filename': srt_destination.name if srt_destination else None}
+                'captions_burned': with_captions, 'srt_filename': srt_destination.name if srt_destination else None,
+                'caption_technical_details': caption_warning if caption_warning and 'Roman conversion failed' in caption_warning else ''}
     finally:
         temp.unlink(missing_ok=True)
         if caption_temp is not None:

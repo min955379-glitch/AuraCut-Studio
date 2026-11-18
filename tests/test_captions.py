@@ -129,15 +129,15 @@ class CaptionRenderTests(unittest.TestCase):
         self.assertIn('missing faster_whisper', result['warning'])
         self.assertTrue((self.root / 'Output_Renders' / result['filename']).exists())
 
-    def test_no_audio_renders_without_captions_and_saves_empty_srt(self):
+    def test_no_audio_renders_without_srt(self):
         source_info = {'duration': 30.0, 'audio': False}
         info = dict(self.output_info, audio=False)
         with patch('app.peakcut.probe', side_effect=[source_info, info]), patch('app.peakcut.executable', return_value='ffmpeg'), patch('app.peakcut.run_ffmpeg', side_effect=self.fake_encode), patch('app.captions.transcribe_clip') as transcribe:
             result = peakcut.render(self.config, 'video.mp4', 0, 15, 'full_screen', {'enabled': True}, cpu_only=True)
         transcribe.assert_not_called()
         self.assertIn('No speech found, rendered without captions', result['caption_message'])
-        self.assertEqual('', (self.root / 'Output_Renders' / result['srt_filename']).read_text(encoding='utf-8-sig'))
-        self.assertEqual(Path(result['filename']).stem, Path(result['srt_filename']).stem)
+        self.assertIsNone(result['srt_filename'])
+        self.assertEqual([], list((self.root / 'Output_Renders').glob('*.srt')))
 
     def test_transcribed_speech_burns_once_with_relative_paths_and_backup(self):
         source_info = {'duration': 30.0, 'audio': True}
@@ -168,7 +168,7 @@ class CaptionRenderTests(unittest.TestCase):
         self.assertTrue(storage.backup_file(self.config, 'Output_Renders', result['filename'])['ok'])
         self.assertFalse(any(p.name.startswith('._peakcut_') for p in (self.root / 'Output_Renders').iterdir()))
 
-    def test_no_speech_with_engine_produces_empty_srt(self):
+    def test_no_speech_with_engine_does_not_create_srt(self):
         source_info = {'duration': 30.0, 'audio': True}
         def extract(source, wav, start, length, progress):
             wav.write_bytes(b'wav')
@@ -176,19 +176,21 @@ class CaptionRenderTests(unittest.TestCase):
             result = peakcut.render(self.config, 'video.mp4', 0, 15, 'full_screen', {'enabled': True}, cpu_only=True)
         self.assertFalse(result['captions_burned'])
         self.assertIn('No speech found', result['caption_message'])
-        self.assertTrue((self.root / 'Output_Renders' / result['srt_filename']).exists())
+        self.assertIsNone(result['srt_filename'])
+        self.assertEqual([], list((self.root / 'Output_Renders').glob('*.srt')))
 
     def test_pair_never_overwrites_a_preexisting_srt(self):
-        source_info = {'duration': 30.0, 'audio': False}
-        info = dict(self.output_info, audio=False)
         folder = self.root / 'Output_Renders'
-        original = folder / 'peakcut_video_0.00-15.00_full_screen.srt'
+        original = folder / 'example.srt'
         original.write_text('keep me')
-        with patch('app.peakcut.probe', side_effect=[source_info, info]), patch('app.peakcut.executable', return_value='ffmpeg'), patch('app.peakcut.run_ffmpeg', side_effect=self.fake_encode):
-            result = peakcut.render(self.config, 'video.mp4', 0, 15, 'full_screen', {'enabled': True}, cpu_only=True)
+        video_temp, srt_temp = folder / '._peakcut_video.mp4', folder / '._peakcut_sub.srt'
+        video_temp.write_bytes(b'video')
+        srt_temp.write_bytes(b'subtitles')
+        video, srt = peakcut.publish_pair(video_temp, srt_temp, folder, 'example')
         self.assertEqual('keep me', original.read_text())
-        self.assertTrue(result['srt_filename'].endswith('_1.srt'))
-        self.assertFalse((folder / 'peakcut_video_0.00-15.00_full_screen.mp4').exists())
+        self.assertEqual('example_1.mp4', video.name)
+        self.assertEqual('example_1.srt', srt.name)
+        self.assertFalse((folder / 'example.mp4').exists())
 
 
 class EngineTests(unittest.TestCase):

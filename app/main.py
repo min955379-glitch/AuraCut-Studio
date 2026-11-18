@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.concurrency import run_in_threadpool
 
-from app import brain_ai, captions, health, jobs, peakcut, storage
+from app import autobackup, brain_ai, captions, health, jobs, peakcut, storage
 from app.common import AppError, LOG_LINES, ROOT, error_data, logger, settings, workspace
 
 app = FastAPI(title='AuraCut Studio', docs_url=None, redoc_url=None, openapi_url=None)
@@ -93,7 +93,14 @@ async def get_health():
     engine_check = (health.entry('Captions engine', 'PASS', 'Installed and ready.') if installed else
                     health.entry('Captions engine', 'WARN', 'Not installed or cannot load: {}'.format(engine_reason),
                                  'Click Install captions engine in the PeakCut card.'))
-    checks = local + [ollama, gemini, engine_check, health.entry('AMF encode test', 'WARN', 'Not run by this health check.', 'Click Run GPU encode test to verify the hardware encoder.')]
+    try:
+        backup_state = autobackup.status(config)
+        last = backup_state.get('last')
+        backup_detail = '{} · {}'.format('ON' if autobackup.enabled(config) else 'OFF', (last['time'] + ' · ' + last['message']) if last else 'No backup result yet.')
+        backup_check = health.entry('Auto backup', 'PASS', backup_detail)
+    except AppError as exc:
+        backup_check = health.entry('Auto backup', 'WARN', exc.real_cause, exc.fix)
+    checks = local + [ollama, gemini, engine_check, backup_check, health.entry('AMF encode test', 'WARN', 'Not run by this health check.', 'Click Run GPU encode test to verify the hardware encoder.')]
     timeout_warning = health.timeout_check(config)
     if timeout_warning:
         checks.append(timeout_warning)
@@ -185,7 +192,15 @@ async def upload(request: Request):
             raise AppError('Upload', 'The upload ended before the file was complete.', 'Check the connection and upload the file again.')
         path = state['path']
         logger.info('Uploaded to local workspace: %s', path)
-        return {'ok': True, 'name': path.name, 'size': path.stat().st_size}
+        result = {'ok': True, 'name': path.name, 'size': path.stat().st_size}
+        try:
+            config = settings()
+            if autobackup.enabled(config) and autobackup.inputs_enabled(config):
+                autobackup.enqueue(config, 'Input_Media', [path.name])
+        except Exception as exc:
+            result['backup_warning'] = 'Input backup could not start: {}. Fix: Check auto backup settings and local workspace.'.format(exc)
+            logger.error('%s', result['backup_warning'])
+        return result
     except Exception:
         if state['output'] and not state['output'].closed:
             state['output'].close()
@@ -198,7 +213,12 @@ async def upload(request: Request):
 
 @app.get('/api/files')
 def files():
-    return {'ok': True, 'files': storage.list_files(settings())}
+    config = settings()
+    records = autobackup.status(config)['records']
+    files = storage.list_files(config)
+    for file in files:
+        file['auto_backup'] = records.get(file['folder'] + '/' + file['name'])
+    return {'ok': True, 'files': files}
 
 
 class FileChoice(BaseModel):
@@ -208,7 +228,7 @@ class FileChoice(BaseModel):
 
 @app.post('/api/backup')
 def backup(choice: FileChoice):
-    result = storage.backup_file(settings(), choice.folder, choice.name)
+    result = autobackup.manual_backup(settings(), choice.folder, choice.name)
     logger.info(result['message'])
     return result
 
@@ -218,7 +238,7 @@ def backup_start(choice: FileChoice):
     config = settings()
     storage.safe_file(config, choice.folder, choice.name)
     storage.drive_folder(config)
-    job_id = jobs.submit('Drive backup', storage.backup_file, config, choice.folder, choice.name)
+    job_id = jobs.submit('Drive backup', autobackup.manual_backup, config, choice.folder, choice.name)
     return {'ok': True, 'job_id': job_id}
 
 
@@ -226,6 +246,18 @@ def backup_start(choice: FileChoice):
 def captions_test():
     job_id = jobs.submit('Captions engine test', captions.test_engine, settings())
     return {'ok': True, 'job_id': job_id}
+
+
+@app.get('/api/auto-backup')
+def auto_backup_status():
+    config = settings()
+    return {'ok': True, 'enabled': autobackup.enabled(config), **autobackup.status(config)}
+
+
+@app.post('/api/auto-backup/retry')
+def auto_backup_retry():
+    count = autobackup.retry_pending(settings())
+    return {'ok': True, 'message': 'Queued {} pending file(s).'.format(count), 'count': count}
 
 
 class ScriptRequest(BaseModel):
@@ -271,6 +303,7 @@ class CaptionOptions(BaseModel):
     style: Literal['bold_gold', 'clean_ivory'] = 'bold_gold'
     language: Literal['auto', 'en', 'ur', 'hi'] = 'auto'
     text_mode: Literal['as_spoken', 'translate'] = 'as_spoken'
+    mode: Literal['english', 'roman_hindi', 'roman_urdu', 'original'] | None = None
     model_size: Literal['small', 'base'] = 'small'
 
 
@@ -290,6 +323,22 @@ def peakcut_analyze(data: PeakAnalyzeRequest):
     return {'ok': True, 'job_id': job_id}
 
 
+def render_with_backup(config, filename, start, end, framing, options, progress):
+    result = peakcut.render(config, filename, start, end, framing, options, progress=progress)
+    try:
+        if autobackup.enabled(config):
+            autobackup.enqueue(config, 'Output_Renders', [result['filename'], result.get('srt_filename')])
+            result['auto_backup'] = 'queued'
+        else:
+            result['auto_backup'] = 'off'
+    except Exception as exc:
+        detail = 'Auto backup could not start: {}. Fix: Check Drive settings and local workspace, then use Back up to Drive.'.format(exc)
+        result['auto_backup'] = 'pending'
+        result['backup_warning'] = detail
+        logger.error('%s', detail)
+    return result
+
+
 @app.post('/api/peakcut/render')
 def peakcut_render(data: PeakRenderRequest):
     config = settings()
@@ -297,7 +346,7 @@ def peakcut_render(data: PeakRenderRequest):
     peakcut.filter_for(data.framing)
     if data.end <= data.start:
         raise AppError('PeakCut render', 'The end time must be after the start time.', 'Choose a valid ranked moment and try again.')
-    job_id = jobs.submit('PeakCut render', peakcut.render, config, data.filename, data.start, data.end, data.framing, data.captions.model_dump())
+    job_id = jobs.submit('PeakCut render', render_with_backup, config, data.filename, data.start, data.end, data.framing, data.captions.model_dump())
     return {'ok': True, 'job_id': job_id}
 
 
