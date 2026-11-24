@@ -111,3 +111,16 @@
 
 ### Verified by user
 - Not yet for professional caption styling and preview.
+
+
+## Phase 3C-Fix — caption size and line spacing
+
+### Done
+- The user reported a 0.13-second Windows preview and good placement, but text was too small. Before this fix, the Linux FFmpeg Large Bold Gold Glow preview measured 314 px wide on its first line; solid ivory capitals were 27 px tall and the popped gold capitals were 31 px tall. The second line measured 227 px wide; visible fill-to-fill line gap was 57 px.
+- The ASS canvas already matched 1080x1920. The bundled font has a 714-unit cap height in a 2112-unit ascender/descender box, so libass produced capitals much shorter than the ASS font-size number. The previous character-count width heuristic also reduced the Large sample from 88 to 80 ASS units. The font's large line box caused loose line spacing.
+- Calibrated ASS sizes for visible capital height and placed each line separately with tighter spacing. Glyph-advance-based grouping keeps words intact and shrinks only an oversized group; unsupported glyphs use a conservative estimate. Preview and PeakCut still share the same ASS builder, bundled font and filter. SRT and Roman/Drive behavior were not changed. No dependencies changed.
+- On this Linux sandbox, after the fix, the Large Bold Gold Glow first line measured 772 px wide with 66 px ivory and 76 px popped gold capitals; the second line was 558 px wide and 66 px tall, with a 23 px fill-to-fill gap. Sizes and glyphs can render differently on other FFmpeg/libass/font setups.
+- Real FFmpeg pixel tests covered 3 presets by 3 sizes, 1080x1920 PeakCut-filter synthetic video at all sizes, and long Latin, Hindi and Urdu samples including every spoken-word highlight. All passed locally. A full suite run passed 106 of 110 tests; 4 skipped because ffprobe, optional faster-whisper or NumPy were not available. No Windows speech or AMD test was performed.
+
+### User PC result
+- Awaiting the user's Windows preview and real speech-render results, including screenshots and any clipping or shaping problems.

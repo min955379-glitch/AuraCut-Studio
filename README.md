@@ -43,6 +43,24 @@ AuraCut runs locally on your Windows 10 or 11 PC. PeakCut finds loud moments in 
 
 If port 8000 belongs to another program, the launcher reports the process when Windows can identify it. Close that program yourself and retry. AuraCut never stops it for you. If AuraCut is already running, the launcher opens the existing page.
 
+## Check the Phase 3C caption-size fix
+
+1. Open PowerShell in the AuraCut repository. If Git reports changes, stop and ask for help before switching branches.
+
+   ```powershell
+   cd C:\AuraCut-Studio
+   git status
+   git fetch origin
+   git switch arena/8c298603-auracut-studio
+   git pull
+   ```
+
+2. Close the old black window. Double-click `Start AuraCut.bat`, then press **Ctrl+F5** in the browser.
+3. In PeakCut, try Medium, Large and Extra Large using **Preview Caption Style**. Compare size, line spacing and safe areas. Try a speech render and check the video as well.
+4. Send Arena your before/after measurements if available, preview and rendered-video pictures, and any red error text. If measuring is difficult, send the original-size images so Arena can help measure them. Do not send API keys or `.env` contents.
+
+For comparison only, the sandbox Large Bold Gold Glow preview measured 314 px wide with 27 px ivory capitals before the fix, and 772 px wide with 66 px ivory capitals after it. Results on Windows may differ.
+
 ## Try caption styling and preview
 
 1. Close the old AuraCut black window, open `Start AuraCut.bat`, then press **Ctrl+F5** in the browser.

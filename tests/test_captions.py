@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -49,7 +50,7 @@ class BuilderTests(unittest.TestCase):
         self.assertIn(r'\3c&H845B2B&', captions.ass_text(WORDS, 'steel_blue_glow'))
         self.assertIn(r'\3c&H4E2B10&', captions.ass_text(WORDS, 'bold_gold_glow'))
         for size, expected in captions.SIZES.items():
-            self.assertIn('AuraCut Caption,{},'.format(expected), captions.ass_text(WORDS, size=size))
+            self.assertIn('AuraCut Caption,{},'.format(math.ceil(expected * captions.ASS_SIZE_FACTOR)), captions.ass_text(WORDS, size=size))
         self.assertIn('HELLO', captions.ass_text(WORDS, all_caps=True))
         self.assertIn('Hello', captions.ass_text(WORDS, all_caps=False))
 

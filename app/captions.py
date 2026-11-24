@@ -5,6 +5,8 @@ import math
 import os
 import re
 import shutil
+import struct
+from functools import lru_cache
 import subprocess
 import sys
 import threading
@@ -338,40 +340,140 @@ def ass_safe(text):
     return text.replace('\\', '＼').replace('{', '｛').replace('}', '｝')
 
 
+# ASS font size is based on the font's full ascender-to-descender box, not
+# its capital height. This bundled font's 714-unit cap height occupies only
+# 714/2112 of that box. Calibrate ASS sizes to the requested visible sizes.
+ASS_SIZE_FACTOR = 2.22
+SAFE_LINE_WIDTH = 864  # 900 px between margins, minus room for outlines/glow
+
+
+@lru_cache(maxsize=1)
+def _font_metrics():
+    """Read advances from the bundled TrueType font using the standard library."""
+    try:
+        data = FONT_PATH.read_bytes()
+        u16 = lambda pos: struct.unpack_from('>H', data, pos)[0]
+        s16 = lambda pos: struct.unpack_from('>h', data, pos)[0]
+        u32 = lambda pos: struct.unpack_from('>I', data, pos)[0]
+        tables = {}
+        for i in range(u16(4)):
+            pos = 12 + i * 16
+            tables[data[pos:pos + 4]] = u32(pos + 8)
+        hhea, hmtx, cmap = tables[b'hhea'], tables[b'hmtx'], tables[b'cmap']
+        full_height = s16(hhea + 4) - s16(hhea + 6)
+        num_hmetrics = u16(hhea + 34)
+        fmt4 = None
+        for i in range(u16(cmap + 2)):
+            sub = cmap + u32(cmap + 4 + i * 8 + 4)
+            if u16(sub) == 4:
+                fmt4 = sub
+                break
+        if not fmt4 or full_height <= 0 or num_hmetrics <= 0:
+            raise ValueError('Unsupported bundled font metrics')
+        count = u16(fmt4 + 6) // 2
+        ends = fmt4 + 14
+        starts = ends + count * 2 + 2
+        deltas = starts + count * 2
+        ranges = deltas + count * 2
+        advances = {}
+        # Cmap format 4 covers the bundled font's supported Unicode BMP glyphs.
+        for i in range(count):
+            first, last = u16(starts + i * 2), min(u16(ends + i * 2), 0xfffe)
+            delta, offset = s16(deltas + i * 2), u16(ranges + i * 2)
+            for code in range(first, last + 1):
+                if offset:
+                    address = ranges + i * 2 + offset + 2 * (code - first)
+                    glyph = u16(address)
+                    glyph = (glyph + delta) & 0xffff if glyph else 0
+                else:
+                    glyph = (code + delta) & 0xffff
+                if glyph:
+                    advances[code] = u16(hmtx + 4 * min(glyph, num_hmetrics - 1))
+        return full_height, advances
+    except (OSError, KeyError, ValueError, struct.error) as exc:
+        raise AppError('Caption font', 'Could not read the bundled font metrics: {}'.format(exc),
+                       'Restore the bundled caption font and restart AuraCut.') from exc
+
+
+def _line_width(words, font_size, pop):
+    full_height, advances = _font_metrics()
+    # Unknown glyphs may use fallback fonts: reserve two ems per character.
+    # Non-Latin shaping can alter advances, so reserve extra space as well.
+    def width(text):
+        return sum(advances.get(ord(char), 2000) for char in ass_safe(text))
+    sizes = [width(w['text']) for w in words]
+    space = advances.get(ord(' '), 500)
+    units = sum(sizes) + max(0, len(sizes) - 1) * space
+    if pop and sizes:
+        units += 0.15 * max(sizes)
+    non_latin = any(ord(c) > 127 for w in words for c in w['text'])
+    return units * font_size / full_height * (1.20 if non_latin else 1.025)
+
+
+def caption_groups(words, font_size, pop):
+    """Break groups on estimated glyph width, never by cutting a word."""
+    groups, group, lines = [], [], []
+    for word in words:
+        text = clean_word(word['text'])
+        if not text:
+            continue
+        item = {'text': text, 'start': float(word['start']), 'end': float(word['end'])}
+        too_wide = _line_width([item], font_size, pop) > SAFE_LINE_WIDTH
+        if group and (len(group) >= 4 or too_wide):
+            groups.append({'words': group, 'lines': lines})
+            group, lines = [], []
+        if not lines:
+            lines.append([])
+        if lines[-1] and _line_width(lines[-1] + [item], font_size, pop) > SAFE_LINE_WIDTH:
+            if len(lines) == 2:
+                groups.append({'words': group, 'lines': lines})
+                group, lines = [], [[]]
+            else:
+                lines.append([])
+        group.append(item)
+        lines[-1].append(item)
+        if too_wide:
+            groups.append({'words': group, 'lines': lines})
+            group, lines = [], []
+    if group:
+        groups.append({'words': group, 'lines': lines})
+    return groups
+
+
 def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
     preset = LEGACY_STYLES.get(preset, preset)
     if preset not in STYLES or size not in SIZES or not isinstance(all_caps, bool):
         raise AppError('Caption style', 'Unsupported preset, size, or all-caps setting.',
                        'Choose one of the listed caption presets and sizes.')
-    style, font_size = STYLES[preset], SIZES[size]
+    style, display_size = STYLES[preset], SIZES[size]
+    font_size = math.ceil(display_size * ASS_SIZE_FACTOR)
     header = ('[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n'
               '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, '
               'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
               'Style: Default,AuraCut Caption,{},{},{},{},{},-1,0,0,0,100,100,0,0,1,{},{},2,90,90,420,1\n\n'
               '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n').format(
                   font_size, IVORY_ASS, GOLD_ASS, style['outline_color'], NAVY_ASS, style['outline'], style['shadow'])
-    # Uppercase before grouping: case conversion may expand a word (e.g. ß).
     display_words = [{**w, 'text': str(w['text']).upper() if all_caps else str(w['text'])} for w in words]
-    line_limit = {'medium': 16, 'large': 13, 'extra_large': 11}[size]
     events = []
-    for group in group_words(display_words, max_words=4, max_line_chars=line_limit):
-        longest = max(len(' '.join(w['text'] for w in line)) for line in group['lines'])
-        # Long unbreakable words must not overflow the safe side margins. Keep
-        # extra room for the 115% pop, outline, and wide glyphs.
-        effective_size = max(1, min(font_size, int(840 / max(1, longest) / 0.7 / 1.15)))
-        def text_for(active):
-            parts = []
-            for line in group['lines']:
-                pieces = []
-                for word in line:
-                    value = ass_safe(word['text'])
-                    if word is active:
-                        pop = r'\fscx115\fscy115' if style['pop'] else ''
-                        reset = r'\fscx100\fscy100' if style['pop'] else ''
-                        value = r'{\1c&H55ADD6&' + pop + '}' + value + r'{\1c&HE5F1F7&' + reset + '}'
-                    pieces.append(value)
-                parts.append(' '.join(pieces))
-            return r'{\fs' + str(effective_size) + '}' + r'\N'.join(parts)
+    for group in caption_groups(display_words, font_size, style['pop']):
+        width = max(_line_width(line, font_size, style['pop']) for line in group['lines'])
+        effective_size = min(font_size, math.floor(font_size * SAFE_LINE_WIDTH / width)) if width else font_size
+        if effective_size < 1:
+            raise AppError('Caption layout', 'A word is too long to fit even at the smallest caption size.',
+                           'Shorten that word and retry; no letters were cut.')
+        # Place separate lines with a controlled baseline distance: the bundled
+        # multi-script font otherwise has a very large intrinsic line box.
+        spacing = round(display_size * effective_size / font_size * 0.90)
+        def text_for(line, active, y):
+            pieces = []
+            for word in line:
+                value = ass_safe(word['text'])
+                if word is active:
+                    pop = r'\fscx115\fscy115' if style['pop'] else ''
+                    reset = r'\fscx100\fscy100' if style['pop'] else ''
+                    value = r'{\1c&H55ADD6&' + pop + '}' + value + r'{\1c&HE5F1F7&' + reset + '}'
+                pieces.append(value)
+            return r'{\an2\pos(540,' + str(y) + r')\fs' + str(effective_size) + '}' + ' '.join(pieces)
         def append_event(start, end, active):
             if end <= start:
                 return
@@ -379,13 +481,13 @@ def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
             if end_cs <= start_cs:
                 end_cs = start_cs + 1
             times = '{},{}'.format(format_ass_time(start_cs / 100), format_ass_time(end_cs / 100))
-            text = text_for(active)
-            if style['glow']:
-                # Two aligned ASS layers: a blurred colored outer border beneath
-                # the ordinary obsidian outlined foreground. Transparent fill.
-                glow_rgb = style['glow'][4:]
-                events.append('Dialogue: 0,{},Default,,0,0,0,,{{\\1a&HFF&\\3c&H{}\\bord9\\blur5\\shad0}}{}'.format(times, glow_rgb, text))
-            events.append('Dialogue: 1,{},Default,,0,0,0,,{}'.format(times, text))
+            for i, line in enumerate(group['lines']):
+                y = 1530 - (len(group['lines']) - 1 - i) * spacing
+                text = text_for(line, active, y)
+                if style['glow']:
+                    glow_rgb = style['glow'][4:]
+                    events.append('Dialogue: 0,{},Default,,0,0,0,,{{\\1a&HFF&\\3c&H{}\\bord9\\blur5\\shad0}}{}'.format(times, glow_rgb, text))
+                events.append('Dialogue: 1,{},Default,,0,0,0,,{}'.format(times, text))
         items = group['words']
         for i, word in enumerate(items):
             next_start = items[i + 1]['start'] if i + 1 < len(items) else word['end']

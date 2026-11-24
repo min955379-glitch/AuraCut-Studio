@@ -1,4 +1,6 @@
+import math
 import os
+import re
 import shutil
 import struct
 import subprocess
@@ -31,7 +33,10 @@ class StyleTests(unittest.TestCase):
             for line in text.splitlines():
                 if line.startswith('Dialogue:'):
                     self.assertLessEqual(line.count(r'\N'), 1)
-            self.assertNotIn(r'\fs104}', text)
+            long_event = next(line for line in text.splitlines() if line.startswith('Dialogue: 1,') and 'ExtremelyLongUnbreakableWord' in line)
+            actual_size = int(re.search(r'\\fs(\d+)', long_event).group(1))
+            self.assertLess(actual_size, math.ceil(captions.SIZES[size] * captions.ASS_SIZE_FACTOR))
+            self.assertIn(r'\fs%d}' % math.ceil(captions.SIZES[size] * captions.ASS_SIZE_FACTOR), text)
 
     def test_invalid_request_and_missing_ffmpeg_report_real_error(self):
         with TestClient(app) as client:
@@ -58,7 +63,7 @@ class StyleTests(unittest.TestCase):
             def encode(args, timeout, on_line, cwd=None):
                 self.assertIn(captions.ASS_FILTER, args[args.index('-filter_complex') + 1])
                 text = (Path(cwd) / 'captions.ass').read_text(encoding='utf-8')
-                self.assertIn('AuraCut Caption,104,', text)
+                self.assertIn('AuraCut Caption,231,', text)
                 self.assertIn(r'\3c&H845B2B&', text)
                 self.assertIn('Hello', text)
                 Path(args[-1]).write_bytes(b'output')
