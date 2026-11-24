@@ -124,3 +124,16 @@
 
 ### User PC result
 - Awaiting the user's Windows preview and real speech-render results, including screenshots and any clipping or shaping problems.
+
+
+## Phase 3C-Fix 2 — active-word line overlap
+
+### Done
+- The user reports caption size and placement look good on their Windows PC, but a gold word on line 2 touched the line above in a real render.
+- Reproduced in Linux FFmpeg with Large Bold Gold Glow, ALL CAPS: “AND THE LITTLE” above active “PUT”. Before the change, solid ivory ended at y=1383 and gold began at y=1379: a 5 px fill overlap. When measured separately, outline/glow bounds overlapped by 40 px.
+- The 115% lower-line vertical pop grew upward while line spacing used only the normal-size estimate. Spacing now uses the actual font glyph bounds, active-word scaling, outline and glow allowance. The lower line stays anchored; the top line may move slightly as the active word changes. The original 115% pop and font sizes remain. Preview and render share the same builder; the preview now shows gold on line 2.
+- After the change, the same sandbox sample has 55 px between solid fills, or 20 px clear between the full styled bounds. Real FFmpeg tests measure both active-line positions for all 3 presets and 3 sizes, all preview variants, a synthetic PeakCut video, and additional lowercase, Hindi and Urdu examples. Existing size and margin pixel checks were rerun. Linux full suite: 114 tests, 109 passed and 5 skipped (two need ffprobe; others need faster-whisper, NumPy or fonttools). No speech or Windows AMD hardware test was performed here.
+- Existing spacing assertion was updated because its previous fill-gap maximum excluded outlines/glow and conflicted with a clear styled gap. The existing pixel-size, width, margin and safe-zone checks remain in place. No dependencies, Roman conversion, Drive or Ollama code were changed.
+
+### User PC result
+- Awaiting the user's new Windows real-render frame and any reported errors or unwanted line movement.

@@ -1,4 +1,5 @@
 """Pixel measurements against real FFmpeg/libass, never mocked."""
+import math
 import os
 import shutil
 import struct
@@ -13,7 +14,7 @@ from app.common import workspace
 WIDTH, HEIGHT = 1080, 1920
 FRAME_BYTES = WIDTH * HEIGHT * 3
 MIN_CAPS = {'medium': 52, 'large': 64, 'extra_large': 76}
-SAMPLE = [{'text': word, 'start': i * .4, 'end': (i + 1) * .4}
+SAMPLE = [{'text': word, 'start': i * .1, 'end': (i + 1) * .1}
           for i, word in enumerate(('Your', 'captions', 'look', 'great'))]
 
 
@@ -91,14 +92,16 @@ class CaptionPixelTests(unittest.TestCase):
         self.assertEqual(FRAME_BYTES, len(data))
         bands = color_bands(data)
         self.assertEqual(2, len(bands), bands)
-        self.assertGreaterEqual(max(band['ivory_height'] for band in bands), MIN_CAPS[size], bands)
+        self.assertGreaterEqual(bands[0]['ivory_height'], MIN_CAPS[size], bands)
         self.assertGreaterEqual(bands[0]['top'], 150)
         self.assertLessEqual(bands[-1]['bottom'], HEIGHT - 380)
         for band in bands:
             self.assertGreater(band['width'], 0)
             self.assertGreaterEqual(band['left'], 90)
             self.assertLess(band['right'], WIDTH - 90)
-        self.assertLessEqual(bands[1]['top'] - bands[0]['bottom'] - 1, round(.35 * captions.SIZES[size]))
+        # The old .35 limit ignored the glow and conflicted with a real
+        # 12 px clear gap; keep a compact upper bound including the glow.
+        self.assertLessEqual(bands[1]['top'] - bands[0]['bottom'] - 1, round(.85 * captions.SIZES[size]))
         if size == 'large':
             width = max(b['width'] for b in bands)
             self.assertGreaterEqual(width, .55 * WIDTH, bands)
@@ -118,7 +121,7 @@ class CaptionPixelTests(unittest.TestCase):
             root = Path(tmp)
             source = root / 'source.mp4'
             subprocess.run([shutil.which('ffmpeg'), '-v', 'error', '-f', 'lavfi', '-i',
-                            'color=c=0x121316:s=1080x1920:r=30:d=0.2', '-c:v', 'libx264',
+                            'color=c=0x121316:s=1080x1920:r=30:d=0.5', '-c:v', 'libx264',
                             '-threads', '1', '-pix_fmt', 'yuv420p', str(source)],
                            capture_output=True, timeout=60, check=True)
             for size in captions.SIZES:
@@ -127,15 +130,18 @@ class CaptionPixelTests(unittest.TestCase):
                     subdir.mkdir()
                     captions.prepare_ass(subdir, SAMPLE, 'bold_gold_glow', size, True)
                     output = root / (size + '.mp4')
-                    args = peakcut.render_args(source, output, 0, .1, 'full_screen', 'libx264', with_captions=True)
+                    args = peakcut.render_args(source, output, 0, .4, 'full_screen', 'libx264', with_captions=True)
                     ok, detail = peakcut.run_ffmpeg(args, 90, lambda line: None, cwd=subdir)
                     self.assertTrue(ok, detail)
-                    frame = subprocess.run([shutil.which('ffmpeg'), '-v', 'error', '-i', str(output), '-frames:v', '1',
+                    upper = [{**w, 'text': w['text'].upper()} for w in SAMPLE]
+                    group = captions.caption_groups(upper, math.ceil(captions.SIZES[size] * captions.ASS_SIZE_FACTOR), True)[0]
+                    index = next(i for i, w in enumerate(upper) if w['text'] == group['lines'][1][0]['text'])
+                    frame = subprocess.run([shutil.which('ffmpeg'), '-v', 'error', '-i', str(output), '-ss', '{:.1f}'.format(index * .1), '-frames:v', '1',
                                             '-f', 'rawvideo', '-pix_fmt', 'rgb24', 'pipe:1'],
                                            capture_output=True, timeout=30, check=True).stdout
                     video_bands = self.check_metrics(frame, size, 'bold_gold_glow')
                     preview_bands = color_bands(decode(captions.preview_png(self.config, 'bold_gold_glow', size, True)))
-                    self.assertLessEqual(abs(max(b['ivory_height'] for b in video_bands) - max(b['ivory_height'] for b in preview_bands)), 2)
+                    self.assertLessEqual(abs(video_bands[0]['ivory_height'] - preview_bands[0]['ivory_height']), 2)
                     self.assertLessEqual(abs(max(b['width'] for b in video_bands) - max(b['width'] for b in preview_bands)), 4)
 
     def test_long_word_and_hindi_urdu_stay_inside_safe_margins(self):

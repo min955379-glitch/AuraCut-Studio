@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import traceback
+import unicodedata
 import wave
 import tempfile
 import time
@@ -345,6 +346,9 @@ def ass_safe(text):
 # 714/2112 of that box. Calibrate ASS sizes to the requested visible sizes.
 ASS_SIZE_FACTOR = 2.22
 SAFE_LINE_WIDTH = 864  # 900 px between margins, minus room for outlines/glow
+# Retain the original 115% pop, including in two-line blocks.
+TWO_LINE_POP_Y = 115
+MIN_CLEAR_GAP = 12
 
 
 @lru_cache(maxsize=1)
@@ -360,7 +364,10 @@ def _font_metrics():
             pos = 12 + i * 16
             tables[data[pos:pos + 4]] = u32(pos + 8)
         hhea, hmtx, cmap = tables[b'hhea'], tables[b'hmtx'], tables[b'cmap']
-        full_height = s16(hhea + 4) - s16(hhea + 6)
+        descent = -s16(hhea + 6)
+        full_height = s16(hhea + 4) + descent
+        head, loca, glyf = tables[b'head'], tables[b'loca'], tables[b'glyf']
+        long_loca = s16(head + 50) == 1
         num_hmetrics = u16(hhea + 34)
         fmt4 = None
         for i in range(u16(cmap + 2)):
@@ -375,7 +382,7 @@ def _font_metrics():
         starts = ends + count * 2 + 2
         deltas = starts + count * 2
         ranges = deltas + count * 2
-        advances = {}
+        advances, ink_bounds = {}, {}
         # Cmap format 4 covers the bundled font's supported Unicode BMP glyphs.
         for i in range(count):
             first, last = u16(starts + i * 2), min(u16(ends + i * 2), 0xfffe)
@@ -389,14 +396,18 @@ def _font_metrics():
                     glyph = (code + delta) & 0xffff
                 if glyph:
                     advances[code] = u16(hmtx + 4 * min(glyph, num_hmetrics - 1))
-        return full_height, advances
+                    start = u32(loca + 4 * glyph) if long_loca else u16(loca + 2 * glyph) * 2
+                    end = u32(loca + 4 * (glyph + 1)) if long_loca else u16(loca + 2 * (glyph + 1)) * 2
+                    if start != end:
+                        ink_bounds[code] = (s16(glyf + start + 4), s16(glyf + start + 8))
+        return full_height, advances, descent, ink_bounds
     except (OSError, KeyError, ValueError, struct.error) as exc:
         raise AppError('Caption font', 'Could not read the bundled font metrics: {}'.format(exc),
                        'Restore the bundled caption font and restart AuraCut.') from exc
 
 
 def _line_width(words, font_size, pop):
-    full_height, advances = _font_metrics()
+    full_height, advances, _, _ = _font_metrics()
     # Unknown glyphs may use fallback fonts: reserve two ems per character.
     # Non-Latin shaping can alter advances, so reserve extra space as well.
     def width(text):
@@ -440,6 +451,41 @@ def caption_groups(words, font_size, pop):
     return groups
 
 
+def _line_extents(line):
+    """Conservative glyph ink bounds relative to the baseline, in font units."""
+    _, _, _, bounds = _font_metrics()
+    chars = [char for word in line for char in ass_safe(word['text'])]
+    values = [bounds[ord(char)] for char in chars if ord(char) in bounds]
+    if not values:
+        # Unsupported glyphs may come from a fallback font.
+        return -616, 1488
+    low, high = min(value[0] for value in values), max(value[1] for value in values)
+    if any(ord(char) > 127 for char in chars):
+        # Shaping can reposition marks or substitute glyphs not in cmap.
+        # Reserve a small additional font-unit allowance for shaped text.
+        low, high = low - 100, high + 100
+        if any(ord(char) not in bounds and not char.isspace() and unicodedata.category(char) not in ('Cf', 'Mn', 'Me') for char in chars):
+            low, high = min(low, -616), max(high, 1488)
+    return low, high
+
+
+def _line_spacing(lines, font_size, style, active):
+    """Reserve clearance for ink, active-word pop, outline and glow."""
+    if len(lines) < 2:
+        return 0
+    full_height, _, descent, _ = _font_metrics()
+    def scale(word):
+        return TWO_LINE_POP_Y / 100 if style['pop'] and word is active else 1.0
+    upper = min(scale(word) * (descent + _line_extents([word])[0]) for word in lines[0])
+    lower = max(scale(word) * (descent + _line_extents([word])[1]) for word in lines[1])
+    # Move the top line only when necessary. The active word's enlarged ink
+    # and each layer's entire glow need their own clearance. The lower line
+    # stays anchored so it cannot be pushed into the bottom safe zone.
+    halo = 19 if style['glow'] else 7
+    ink_distance = font_size / full_height * (lower - upper)
+    return math.ceil(max(0, ink_distance) + 2 * halo + MIN_CLEAR_GAP + 2)
+
+
 def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
     preset = LEGACY_STYLES.get(preset, preset)
     if preset not in STYLES or size not in SIZES or not isinstance(all_caps, bool):
@@ -461,15 +507,13 @@ def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
         if effective_size < 1:
             raise AppError('Caption layout', 'A word is too long to fit even at the smallest caption size.',
                            'Shorten that word and retry; no letters were cut.')
-        # Place separate lines with a controlled baseline distance: the bundled
-        # multi-script font otherwise has a very large intrinsic line box.
-        spacing = round(display_size * effective_size / font_size * 0.90)
         def text_for(line, active, y):
             pieces = []
             for word in line:
                 value = ass_safe(word['text'])
                 if word is active:
-                    pop = r'\fscx115\fscy115' if style['pop'] else ''
+                    vertical_pop = TWO_LINE_POP_Y if len(group['lines']) == 2 else 115
+                    pop = r'\fscx115\fscy' + str(vertical_pop) if style['pop'] else ''
                     reset = r'\fscx100\fscy100' if style['pop'] else ''
                     value = r'{\1c&H55ADD6&' + pop + '}' + value + r'{\1c&HE5F1F7&' + reset + '}'
                 pieces.append(value)
@@ -481,6 +525,7 @@ def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
             if end_cs <= start_cs:
                 end_cs = start_cs + 1
             times = '{},{}'.format(format_ass_time(start_cs / 100), format_ass_time(end_cs / 100))
+            spacing = _line_spacing(group['lines'], effective_size, style, active)
             for i, line in enumerate(group['lines']):
                 y = 1530 - (len(group['lines']) - 1 - i) * spacing
                 text = text_for(line, active, y)
@@ -507,9 +552,21 @@ def prepare_ass(directory, words, preset, size, all_caps):
 
 def preview_png(config, preset, size, all_caps):
     # Validate before starting FFmpeg. All temporary files stay in the local workspace.
-    sample = [{'text': word, 'start': i * .4, 'end': (i + 1) * .4}
+    sample = [{'text': word, 'start': i * .1, 'end': (i + 1) * .1}
               for i, word in enumerate(('Your', 'captions', 'look', 'great'))]
     ass_text(sample, preset, size, all_caps)
+    # Show the first active word on line 2, including for Extra Large where
+    # the first group wraps differently. The same sample and builder are used.
+    display = [{**w, 'text': w['text'].upper() if all_caps else w['text']} for w in sample]
+    style = STYLES[LEGACY_STYLES.get(preset, preset)]
+    groups = caption_groups(display, math.ceil(SIZES[size] * ASS_SIZE_FACTOR), style['pop'])
+    preview_group = next((group for group in groups if len(group['lines']) == 2), None)
+    if preview_group is None:
+        raise AppError('Caption preview', 'The sample could not be arranged on two lines.',
+                       'Check the bundled caption font and try again.')
+    lower_word = preview_group['lines'][1][0]['text']
+    active_index = next(i for i, w in enumerate(display) if w['text'] == lower_word)
+    preview_time = active_index * .1
     executable = shutil.which('ffmpeg')
     if not executable:
         raise AppError('Caption preview', 'FFmpeg was not found on PATH.',
@@ -520,8 +577,8 @@ def preview_png(config, preset, size, all_caps):
             directory = Path(tmp)
             prepare_ass(directory, sample, preset, size, all_caps)
             command = [executable, '-hide_banner', '-v', 'error', '-f', 'lavfi', '-i',
-                       'color=c=0x121316:s=1080x1920:r=1:d=1', '-vf', ASS_FILTER,
-                       '-frames:v', '1', '-c:v', 'png', '-threads', '1', '-compression_level', '1',
+                       'color=c=0x121316:s=1080x1920:r=10:d=1', '-vf', ASS_FILTER,
+                       '-ss', '{:.1f}'.format(preview_time), '-frames:v', '1', '-c:v', 'png', '-threads', '1', '-compression_level', '1',
                        '-f', 'image2pipe', 'pipe:1']
             result = subprocess.run(command, cwd=str(directory), capture_output=True, timeout=15)
             if result.returncode or not result.stdout.startswith(b'\x89PNG\r\n\x1a\n'):

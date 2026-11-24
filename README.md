@@ -43,6 +43,24 @@ AuraCut runs locally on your Windows 10 or 11 PC. PeakCut finds loud moments in 
 
 If port 8000 belongs to another program, the launcher reports the process when Windows can identify it. Close that program yourself and retry. AuraCut never stops it for you. If AuraCut is already running, the launcher opens the existing page.
 
+## Check the caption line-overlap fix
+
+1. In PowerShell, open your AuraCut folder and check for local changes. If Git reports changes, stop and ask for help before switching branches.
+
+   ```powershell
+   cd C:\AuraCut-Studio
+   git status
+   git fetch origin
+   git switch arena/8c298603-auracut-studio
+   git pull
+   ```
+
+2. Close the old black window. Double-click `Start AuraCut.bat`, then press **Ctrl+F5** in the browser.
+3. In PeakCut, use **Preview Caption Style**. The sample now highlights a gold word on line 2. Render one speech clip with Large captions; play several moments, especially when a gold word is on line 2. Check the gap and note whether any movement of the upper line is distracting.
+4. Send Arena the before/after gap measurements if available, one original-size real video frame, and any red error text. If measuring is difficult, send the frame and Arena can help. Never share API keys or `.env` contents.
+
+For comparison, the Linux test sample had a 5 px letter-fill overlap before this fix and a 55 px fill gap after it. Including outline/glow, the same sample went from a 40 px overlap to a 20 px clear gap. Windows results may differ.
+
 ## Check the Phase 3C caption-size fix
 
 1. Open PowerShell in the AuraCut repository. If Git reports changes, stop and ask for help before switching branches.
