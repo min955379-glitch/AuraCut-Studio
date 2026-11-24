@@ -228,7 +228,7 @@ def render_args(source, target, start, end, framing, encoder, with_captions=Fals
     output_label = '[v]'
     if with_captions:
         # Both filenames are relative to the subprocess working directory, never a Windows path.
-        filters += ';[v]ass=filename=captions.ass:fontsdir=fonts[captioned]'
+        filters += ';[v]{}[captioned]'.format(captions.ASS_FILTER)
         output_label = '[captioned]'
     args = [executable('ffmpeg'), '-hide_banner', '-v', 'error', '-nostats', '-y', '-ss', '{:.3f}'.format(start),
             '-i', str(source), '-t', '{:.3f}'.format(end - start), '-filter_complex', filters,
@@ -327,12 +327,15 @@ def render(config, filename, start, end, framing, captions_options=None, progres
     try:
         options = captions_options or {}
         if options.get('enabled'):
-            style = options.get('style', 'bold_gold')
+            style = options.get('style') or options.get('preset', 'bold_gold_glow')
+            style = captions.LEGACY_STYLES.get(style, style)
+            size = options.get('size', 'large')
+            all_caps = options.get('all_caps', True)
             language = options.get('language', 'auto')
             mode = options.get('mode') or ('english' if options.get('text_mode') == 'translate' else 'original')
             text_mode = 'translate' if mode == 'english' else 'as_spoken'
             model_size = options.get('model_size', 'small')
-            if style not in captions.STYLES or language not in captions.LANGUAGES or mode not in roman.MODES or model_size not in ('small', 'base'):
+            if style not in captions.STYLES or size not in captions.SIZES or not isinstance(all_caps, bool) or language not in captions.LANGUAGES or mode not in roman.MODES or model_size not in ('small', 'base'):
                 raise AppError('Captions options', 'An unsupported captions option was requested.', 'Choose one of the listed captions options.')
             installed, reason = captions.engine_status() if info['audio'] else (True, '')
             if not installed:
@@ -361,9 +364,7 @@ def render(config, filename, start, end, framing, captions_options=None, progres
                     if words:
                         srt_temp = directory / 'captions.srt'
                         srt_temp.write_text(captions.srt_text(words), encoding='utf-8-sig')
-                        (directory / 'captions.ass').write_text(captions.ass_text(words, style), encoding='utf-8')
-                        (directory / 'fonts').mkdir()
-                        shutil.copy2(captions.FONT_PATH, directory / 'fonts' / 'AuraCutCaption-Bold.ttf')
+                        captions.prepare_ass(directory, words, style, size, all_caps)
                         with_captions = True
                     else:
                         caption_message = 'No speech found, rendered without captions. No SRT was created.'

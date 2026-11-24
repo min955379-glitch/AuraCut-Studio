@@ -1,6 +1,6 @@
-# AuraCut Studio — Phase 3C: Ollama auto-start
+# AuraCut Studio — Phase 3C: caption styling and preview
 
-AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find loud moments in a local video and render a vertical short. The Phase 1 tools remain available.
+AuraCut runs locally on your Windows 10 or 11 PC. PeakCut finds loud moments in a local video and renders vertical shorts. This update adds three caption presets, sizing, ALL CAPS and a style preview.
 
 ## Get Phase 3C
 
@@ -19,7 +19,7 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
 3. Switch to the Phase 3C work branch. If Git reports uncommitted changes, do not discard them; ask for help first.
 
    ```powershell
-   git switch arena/d3ad0999-auracut-studio
+   git switch arena/8c298603-auracut-studio
    ```
 
 4. Pull updates to that branch:
@@ -42,6 +42,17 @@ AuraCut runs locally on your Windows 10 or 11 PC. This phase adds PeakCut: find 
 5. Keep the PowerShell or batch window open while using AuraCut. Press Ctrl+C in that window to stop the server.
 
 If port 8000 belongs to another program, the launcher reports the process when Windows can identify it. Close that program yourself and retry. AuraCut never stops it for you. If AuraCut is already running, the launcher opens the existing page.
+
+## Try caption styling and preview
+
+1. Close the old AuraCut black window, open `Start AuraCut.bat`, then press **Ctrl+F5** in the browser.
+2. In **04 / PeakCut**, choose **Bold Gold Glow**, **Clean Ivory Pro** or **Steel Blue Glow**. Choose Medium, Large or Extra Large. Large and ALL CAPS are the defaults. You can preview without installing the speech engine.
+3. Click **Preview Caption Style**. A vertical image appears below the button. Change a setting and click the button again; the old image clears. The sample uses the same subtitle builder, bundled font and FFmpeg filter as the video. Real words and backgrounds will differ.
+4. Tick **Add captions**, find a speech moment and render it. Compare its style and placement with the preview. Try the presets, sizes and ALL CAPS on and off. Open the `.srt`: uppercase is a display setting; SRT keeps the original text.
+5. Check that captions stay clear of the lower social-app controls and side edges, including unusually long words and Hindi/Urdu text. The bundled font, FFmpeg and Windows rendering may vary; please report any clipping or shaping problems.
+6. Tell your teacher the preview time, each result and any red error text. Do not share your `.env` or API keys. Preview and rendering require FFmpeg with the ASS filter and PNG support; no new Python package or speech-model download is needed for preview.
+
+Preview speed depends on your PC and FFmpeg. The target is under two seconds, not a guarantee on every system. Very long words are reduced to fit instead of being cut.
 
 ## Ollama auto-start
 
@@ -140,7 +151,7 @@ PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 
 
 1. Close the old black AuraCut window, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser. You do **not** need to reinstall the captions engine for this fix; no dependency pins changed.
 2. In **System health**, click **Test captions engine**. It loads the small model and transcribes two seconds of generated silence locally. Wait for **PASS**; the first use may download about 500 MB. A saved complete model is reused. If it fails, expand **Show technical details** in the red error and copy the text.
-3. Find a clear speech moment, tick **Add captions**, choose **Clean Ivory** and **Original script**, then render. Check the words and gold highlight are in sync.
+3. Find a clear speech moment, tick **Add captions**, choose **Clean Ivory Pro** and **Original script**, then render. Check the words and gold highlight are in sync.
 4. Back up the video and the matching `.srt` separately. Watch the copying progress. Verification can take up to 90 seconds; if incomplete, the local file and partial Drive copy remain. Wait and click backup again. Check both Drive copies have the same size as the originals. A same-sized existing file is reported as **Already backed up**; unrelated files with different sizes are never overwritten.
 5. Find moments successfully, then try a two-second video. The failed analysis should not show old results, and the cause should be beside **Failed**.
 6. Tell teacher Claude the result of each step, times, and any red error and technical details. Do not share API keys. Full speech tracebacks are also saved locally in `C:\AuraCut_Workspace\logs\captions.log`.
@@ -150,9 +161,9 @@ PeakCut uses audio loudness, not AI, to rank moments. Clips are 1080 × 1920 at 
 1. Close the old black AuraCut window. Open your repository folder in File Explorer, double-click `Start AuraCut.bat`, and press **Ctrl+F5** in the browser tab. The first app startup may install core packages.
 2. In **System health**, look for **Captions engine: WARN** (not installed). In **04 / PeakCut**, the disabled checkbox explains that installation is needed.
 3. Click **Install captions engine**. Leave the window open. It may take several minutes depending on internet speed. Wait for **Captions engine: PASS**. If it fails, copy the complete red error and its fix.
-4. Select a video with clear speech and click **Find best moments**. Tick **Add captions**, select **Bold Gold**, and render a moment. The first use of the default **small** model downloads about 500 MB into `C:\AuraCut_Workspace\models` and may take several minutes. Watch the stage message and wait; later uses reuse it. The optional **base** model is smaller and faster but can be less accurate. The first use of base also downloads it.
+4. Select a video with clear speech and click **Find best moments**. Tick **Add captions**, select **Bold Gold Glow**, and render a moment. The first use of the default **small** model downloads about 500 MB into `C:\AuraCut_Workspace\models` and may take several minutes. Watch the stage message and wait; later uses reuse it. The optional **base** model is smaller and faster but can be less accurate. The first use of base also downloads it.
 5. Open `C:\AuraCut_Workspace\Output_Renders` in File Explorer and play the new video. Check words follow the voice, the active word is gold, and captions leave the lower 380 pixels clear. Note transcription and render times.
-6. Render the same moment with **Clean Ivory**. Play and compare it.
+6. Render the same moment with **Clean Ivory Pro**. Play and compare it.
 7. Open the matching `.srt` in Notepad: it should contain numbered captions with clip-relative timestamps. A no-speech clip has no SRT.
 8. Click the video and SRT **Back up to Drive** buttons separately; check both appear in your configured Drive folder. AuraCut checks existence and size, not cloud-sync completion.
 9. With captions enabled, render a moment from a music-only video. The video should still be delivered and say **No speech found, rendered without captions**. Speech detection may occasionally mistake music for speech.

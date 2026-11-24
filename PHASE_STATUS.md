@@ -89,10 +89,25 @@
 - Added mocked launcher tests for the running, starting, timeout, missing, disabled, and model-check cases. Linux regression run: 100 tests, 97 passed and 3 skipped (optional speech engine, NumPy, or font inspection unavailable). Mocked tests do NOT prove this works on the user's PC.
 
 ### Not done
-- User verification of Phase 3C auto-start on Windows is still needed. The professional caption styling and preview described in the attached broader prompt were not implemented: the user's current request explicitly restricts this turn to Ollama auto-start.
+- User verification of Phase 3C auto-start on Windows is still needed. At the time of this auto-start task, professional caption styling and preview were deferred by the user; see the separate caption-styling update below.
 
 ### Verified by user
 - Not yet for Phase 3C auto-start.
 
 ### Ideas for later
-- Larger professional captions, styling options and a caption-style preview; caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.
+- Caption rewriting and emoji, translation beyond English, captions outside PeakCut, AI Auto-Editor, music/SFX, speed ramps, face tracking, URL ingest, thumbnails, story tabs, Director Chat, Asset Hunter, scheduling, publishing/OAuth, executable packaging and database. None are implemented in Phase 3.
+
+
+## Phase 3C — professional caption styling and preview
+
+### Done
+- Added Bold Gold Glow, Clean Ivory Pro and Steel Blue Glow, with 72/88/104 base sizes, ALL CAPS display control, 90 px side margins and 420 px bottom margin. Caption ASS events use at most four words and two lines; long words are scaled rather than cut. SRT preserves original casing.
+- Added a 1080x1920 PNG preview endpoint and PeakCut controls. Preview and video use the same ASS builder, relative ASS filter and bundled font. Preview temporary files stay in the local workspace, and preview does not need the optional speech engine. Legacy style names remain accepted for existing API clients.
+- Linux regression: 106 tests run, 101 passed and 5 skipped. Real FFmpeg PNG previews for all presets and a short synthetic PeakCut-filter video burn passed. Nine preset/size previews took 0.050–0.067 seconds each in this sandbox; Windows speed is unverified. Two older real-media tests skipped because ffprobe was unavailable; optional faster-whisper, NumPy and fonttools checks also skipped. Mocked tests do not prove Windows rendering.
+
+### Not done / not verified
+- User has not verified the presets, preview speed, Unicode shaping, clipping or matching rendered captions on Windows. The under-two-second target depends on PC and FFmpeg; it is not guaranteed for every system. The sizing heuristic for unusually wide or complex-script text needs real-world checking.
+- This task does not add Auto-Editor, publishing, OAuth, story tabs, music or other later features. Ollama auto-start remains separately unverified by the user.
+
+### Verified by user
+- Not yet for professional caption styling and preview.

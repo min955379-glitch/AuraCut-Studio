@@ -28,23 +28,30 @@ WORDS = [
 
 class BuilderTests(unittest.TestCase):
     def test_groups_lines_word_times_colors_and_safe_zone(self):
-        groups = captions.group_words(WORDS, max_line_chars=16)
-        self.assertTrue(all(len(g['words']) <= 5 for g in groups))
+        groups = captions.group_words(WORDS, max_words=4, max_line_chars=16)
+        self.assertTrue(all(len(g['words']) <= 4 for g in groups))
         self.assertTrue(all(len(g['lines']) <= 2 for g in groups))
         self.assertEqual([w['text'] for w in WORDS], [w['text'] for g in groups for w in g['words']])
-        for preset in ('bold_gold', 'clean_ivory'):
+        for preset in captions.STYLES:
             text = captions.ass_text(WORDS, preset)
             self.assertIn('PlayResX: 1080', text)
             self.assertIn('PlayResY: 1920', text)
-            self.assertIn(',80,80,420,1', text)
+            self.assertIn(',90,90,420,1', text)
             self.assertIn('&H0055ADD6', text)
             self.assertIn('&H00E5F1F7', text)
+            self.assertIn('&H00161312', text)
             self.assertNotIn('00FF00', text.upper())
             self.assertIn('0:00:00.20,0:00:00.80', text)
-            self.assertIn(r'{\1c&H55ADD6&}Hello', text)
-            self.assertIn('Dialogue: 0,0:00:00.80,0:00:00.90', text)
-        self.assertIn('AuraCut Caption,72', captions.ass_text(WORDS, 'bold_gold'))
-        self.assertIn('AuraCut Caption,58', captions.ass_text(WORDS, 'clean_ivory'))
+            self.assertIn('HELLO', text)
+            self.assertIn('Dialogue: 1,0:00:00.80,0:00:00.90', text)
+        self.assertIn(r'\fscx115\fscy115', captions.ass_text(WORDS, 'bold_gold_glow'))
+        self.assertNotIn(r'\fscx115', captions.ass_text(WORDS, 'clean_ivory_pro'))
+        self.assertIn(r'\3c&H845B2B&', captions.ass_text(WORDS, 'steel_blue_glow'))
+        self.assertIn(r'\3c&H4E2B10&', captions.ass_text(WORDS, 'bold_gold_glow'))
+        for size, expected in captions.SIZES.items():
+            self.assertIn('AuraCut Caption,{},'.format(expected), captions.ass_text(WORDS, size=size))
+        self.assertIn('HELLO', captions.ass_text(WORDS, all_caps=True))
+        self.assertIn('Hello', captions.ass_text(WORDS, all_caps=False))
 
     def test_srt_numbering_timing_and_escaping(self):
         words = [{'text': '<hi> & -->', 'start': 0, 'end': 1.25}, {'text': 'next\nline', 'start': 2, 'end': 61.9996}]
@@ -54,7 +61,7 @@ class BuilderTests(unittest.TestCase):
         self.assertIn('next line', result)
         self.assertEqual('01:01:01,234', captions.format_srt_time(3661.234))
         self.assertEqual('', captions.srt_text([]))
-        unsafe = captions.ass_text([{'text': r'{\fnInjected}Hi', 'start': 0, 'end': 1}], 'bold_gold')
+        unsafe = captions.ass_text([{'text': r'{\fnInjected}Hi', 'start': 0, 'end': 1}], 'bold_gold', all_caps=False)
         self.assertNotIn(r'{\fnInjected}', unsafe)
         self.assertIn('｛＼fnInjected｝Hi', unsafe)
 

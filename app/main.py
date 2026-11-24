@@ -300,7 +300,10 @@ class PeakAnalyzeRequest(BaseModel):
 
 class CaptionOptions(BaseModel):
     enabled: bool = False
-    style: Literal['bold_gold', 'clean_ivory'] = 'bold_gold'
+    preset: Literal['bold_gold_glow', 'clean_ivory_pro', 'steel_blue_glow'] = 'bold_gold_glow'
+    size: Literal['medium', 'large', 'extra_large'] = 'large'
+    all_caps: bool = True
+    style: Literal['bold_gold', 'clean_ivory'] | None = None  # older clients
     language: Literal['auto', 'en', 'ur', 'hi'] = 'auto'
     text_mode: Literal['as_spoken', 'translate'] = 'as_spoken'
     mode: Literal['english', 'roman_hindi', 'roman_urdu', 'original'] | None = None
@@ -348,6 +351,18 @@ def peakcut_render(data: PeakRenderRequest):
         raise AppError('PeakCut render', 'The end time must be after the start time.', 'Choose a valid ranked moment and try again.')
     job_id = jobs.submit('PeakCut render', render_with_backup, config, data.filename, data.start, data.end, data.framing, data.captions.model_dump())
     return {'ok': True, 'job_id': job_id}
+
+
+class CaptionPreviewRequest(BaseModel):
+    preset: Literal['bold_gold_glow', 'clean_ivory_pro', 'steel_blue_glow'] = 'bold_gold_glow'
+    size: Literal['medium', 'large', 'extra_large'] = 'large'
+    all_caps: bool = True
+
+
+@app.post('/api/captions/preview')
+def caption_preview(data: CaptionPreviewRequest):
+    image = captions.preview_png(settings(), data.preset, data.size, data.all_caps)
+    return Response(content=image, media_type='image/png', headers={'Cache-Control': 'no-store'})
 
 
 @app.post('/api/captions/install')

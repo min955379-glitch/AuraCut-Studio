@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -20,12 +21,22 @@ FONT_PATH = ROOT / 'app' / 'assets' / 'fonts' / 'AuraCutCaption-Bold.ttf'
 INSTALL_TIMEOUT = 1800
 SPEECH_TIMEOUT = 1800
 _ENGINE_LOCK = threading.Lock()
-GOLD_ASS = '&H0055ADD6'
-IVORY_ASS = '&H00E5F1F7'
-DARK_ASS = '&H00161312'
+GOLD_ASS = '&H0055ADD6&'
+IVORY_ASS = '&H00E5F1F7&'
+DARK_ASS = '&H00161312&'
+NAVY_ASS = '&H004E2B10&'
+STEEL_ASS = '&H00845B2B&'
 LANGUAGES = {'auto': None, 'en': 'en', 'ur': 'ur', 'hi': 'hi'}
 TEXT_MODES = {'as_spoken': 'transcribe', 'translate': 'translate'}
-STYLES = {'bold_gold': (72, 5), 'clean_ivory': (58, 3)}
+STYLES = {
+    'bold_gold_glow': {'outline': 4.5, 'shadow': 2, 'outline_color': DARK_ASS, 'glow': NAVY_ASS, 'pop': True},
+    'clean_ivory_pro': {'outline': 3.5, 'shadow': 1, 'outline_color': DARK_ASS, 'glow': None, 'pop': False},
+    'steel_blue_glow': {'outline': 4.5, 'shadow': 2, 'outline_color': DARK_ASS, 'glow': STEEL_ASS, 'pop': False},
+}
+SIZES = {'medium': 72, 'large': 88, 'extra_large': 104}
+# Preserve requests from older clients, while presenting only the new presets.
+LEGACY_STYLES = {'bold_gold': 'bold_gold_glow', 'clean_ivory': 'clean_ivory_pro'}
+ASS_FILTER = 'ass=filename=captions.ass:fontsdir=fonts'
 
 
 def engine_status():
@@ -327,39 +338,54 @@ def ass_safe(text):
     return text.replace('\\', '＼').replace('{', '｛').replace('}', '｝')
 
 
-def ass_text(words, style):
-    if style not in STYLES:
-        raise AppError('Caption style', 'Unknown caption style: {}'.format(style), 'Choose Bold Gold or Clean Ivory.')
-    font_size, outline = STYLES[style]
+def ass_text(words, preset='bold_gold_glow', size='large', all_caps=True):
+    preset = LEGACY_STYLES.get(preset, preset)
+    if preset not in STYLES or size not in SIZES or not isinstance(all_caps, bool):
+        raise AppError('Caption style', 'Unsupported preset, size, or all-caps setting.',
+                       'Choose one of the listed caption presets and sizes.')
+    style, font_size = STYLES[preset], SIZES[size]
     header = ('[Script Info]\nScriptType: v4.00+\nPlayResX: 1080\nPlayResY: 1920\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n'
               '[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, '
               'Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n'
-              'Style: Default,AuraCut Caption,{},{},{},{},{},-1,0,0,0,100,100,0,0,1,{},0,2,80,80,420,1\n\n'
+              'Style: Default,AuraCut Caption,{},{},{},{},{},-1,0,0,0,100,100,0,0,1,{},{},2,90,90,420,1\n\n'
               '[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n').format(
-                  font_size, IVORY_ASS, GOLD_ASS, DARK_ASS, DARK_ASS, outline)
+                  font_size, IVORY_ASS, GOLD_ASS, style['outline_color'], NAVY_ASS, style['outline'], style['shadow'])
+    # Uppercase before grouping: case conversion may expand a word (e.g. ß).
+    display_words = [{**w, 'text': str(w['text']).upper() if all_caps else str(w['text'])} for w in words]
+    line_limit = {'medium': 16, 'large': 13, 'extra_large': 11}[size]
     events = []
-    for group in group_words(words):
+    for group in group_words(display_words, max_words=4, max_line_chars=line_limit):
+        longest = max(len(' '.join(w['text'] for w in line)) for line in group['lines'])
+        # Long unbreakable words must not overflow the safe side margins. Keep
+        # extra room for the 115% pop, outline, and wide glyphs.
+        effective_size = max(1, min(font_size, int(840 / max(1, longest) / 0.7 / 1.15)))
         def text_for(active):
             parts = []
-            longest = max(len(' '.join(w['text'] for w in line)) for line in group['lines'])
-            size = max(8, min(font_size, int(font_size * 24 / max(24, longest))))
             for line in group['lines']:
                 pieces = []
                 for word in line:
                     value = ass_safe(word['text'])
                     if word is active:
-                        value = '{\\1c&H55ADD6&}' + value + '{\\1c&HE5F1F7&}'
+                        pop = r'\fscx115\fscy115' if style['pop'] else ''
+                        reset = r'\fscx100\fscy100' if style['pop'] else ''
+                        value = r'{\1c&H55ADD6&' + pop + '}' + value + r'{\1c&HE5F1F7&' + reset + '}'
                     pieces.append(value)
                 parts.append(' '.join(pieces))
-            return '{\\fs' + str(size) + '}' + r'\N'.join(parts)
+            return r'{\fs' + str(effective_size) + '}' + r'\N'.join(parts)
         def append_event(start, end, active):
             if end <= start:
                 return
             start_cs, end_cs = round(start * 100), round(end * 100)
             if end_cs <= start_cs:
                 end_cs = start_cs + 1
-            events.append('Dialogue: 0,{},{},Default,,0,0,0,,{}'.format(format_ass_time(start_cs / 100),
-                          format_ass_time(end_cs / 100), text_for(active)))
+            times = '{},{}'.format(format_ass_time(start_cs / 100), format_ass_time(end_cs / 100))
+            text = text_for(active)
+            if style['glow']:
+                # Two aligned ASS layers: a blurred colored outer border beneath
+                # the ordinary obsidian outlined foreground. Transparent fill.
+                glow_rgb = style['glow'][4:]
+                events.append('Dialogue: 0,{},Default,,0,0,0,,{{\\1a&HFF&\\3c&H{}\\bord9\\blur5\\shad0}}{}'.format(times, glow_rgb, text))
+            events.append('Dialogue: 1,{},Default,,0,0,0,,{}'.format(times, text))
         items = group['words']
         for i, word in enumerate(items):
             next_start = items[i + 1]['start'] if i + 1 < len(items) else word['end']
@@ -368,3 +394,42 @@ def ass_text(words, style):
             if end < next_start:
                 append_event(end, next_start, None)
     return header + '\n'.join(events) + ('\n' if events else '')
+
+
+def prepare_ass(directory, words, preset, size, all_caps):
+    """Use identical relative names and bundled font for previews and renders."""
+    (directory / 'captions.ass').write_text(ass_text(words, preset, size, all_caps), encoding='utf-8')
+    (directory / 'fonts').mkdir()
+    shutil.copy2(FONT_PATH, directory / 'fonts' / 'AuraCutCaption-Bold.ttf')
+
+
+def preview_png(config, preset, size, all_caps):
+    # Validate before starting FFmpeg. All temporary files stay in the local workspace.
+    sample = [{'text': word, 'start': i * .4, 'end': (i + 1) * .4}
+              for i, word in enumerate(('Your', 'captions', 'look', 'great'))]
+    ass_text(sample, preset, size, all_caps)
+    executable = shutil.which('ffmpeg')
+    if not executable:
+        raise AppError('Caption preview', 'FFmpeg was not found on PATH.',
+                       'Install FFmpeg with the ASS filter and restart AuraCut.')
+    folder = workspace(config) / 'Output_Renders'
+    try:
+        with tempfile.TemporaryDirectory(prefix='._peakcut_preview_', dir=str(folder)) as tmp:
+            directory = Path(tmp)
+            prepare_ass(directory, sample, preset, size, all_caps)
+            command = [executable, '-hide_banner', '-v', 'error', '-f', 'lavfi', '-i',
+                       'color=c=0x121316:s=1080x1920:r=1:d=1', '-vf', ASS_FILTER,
+                       '-frames:v', '1', '-c:v', 'png', '-threads', '1', '-compression_level', '1',
+                       '-f', 'image2pipe', 'pipe:1']
+            result = subprocess.run(command, cwd=str(directory), capture_output=True, timeout=15)
+            if result.returncode or not result.stdout.startswith(b'\x89PNG\r\n\x1a\n'):
+                detail = result.stderr.decode('utf-8', errors='replace').strip() or 'FFmpeg did not return a PNG image.'
+                raise AppError('Caption preview', detail[-1200:],
+                               'Check that FFmpeg supports the ASS filter and PNG encoder, then retry.')
+            return result.stdout
+    except subprocess.TimeoutExpired as exc:
+        raise AppError('Caption preview', 'FFmpeg timed out after 15 seconds.',
+                       'Check the FFmpeg installation and try again.') from exc
+    except OSError as exc:
+        raise AppError('Caption preview', 'Could not create preview: {}'.format(exc),
+                       'Check FFmpeg and local workspace permissions, then retry.') from exc

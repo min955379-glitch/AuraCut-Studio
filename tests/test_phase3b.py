@@ -124,7 +124,7 @@ class RomanTests(unittest.TestCase):
             srt = (self.root / 'Output_Renders' / result['srt_filename']).read_text(encoding='utf-8-sig')
             for word in expected:
                 self.assertIn(word['text'], srt)
-                self.assertIn(word['text'], captured['ass'])
+                self.assertIn(word['text'].upper(), captured['ass'])
             self.assertEqual('translate' if mode=='english' else 'as_spoken', transcribe.call_args.args[4])
 
 
